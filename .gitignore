@@ -1,0 +1,21 @@
+## Xcode / XcodeGen
+*.xcodeproj/
+*.xcworkspace/
+!*.xcodeproj/project.pbxproj
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+
+## Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+## macOS
+.DS_Store
+
+## 生成物
+*.ipa
+*.dSYM.zip
+Output/
