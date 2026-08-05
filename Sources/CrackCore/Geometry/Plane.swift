@@ -94,19 +94,109 @@ public enum PlaneFitter {
         return Result(plane: plane, rmsResidual: rms, planarity: planarity, pointCount: points.count)
     }
 
-    /// 外れ値（配管・汚れ・デプスの飛び）を落としながら平面を求める。
-    public static func fitRobust(points: [Vec3], iterations: Int = 3, outlierSigma: Double = 2.0) -> Result? {
+    /// 外れ値（配管・樹木・デプスの飛び）を落としながら平面を求める。
+    ///
+    /// ## なぜ PCA をそのまま反復しないのか
+    ///
+    /// `fit` は全方向の残差を最小化する（主成分分析）ため、**外れ値によって
+    /// Z 方向の分散が X/Y 方向の分散を超えると、最小固有ベクトルが入れ替わって
+    /// 法線が 90° 回ります。** ROI が 40cm 角、外れ値が 7% でもこれは起こり、
+    /// 一度そうなると反復しても復帰できません。
+    ///
+    /// ## 代わりにやっていること
+    ///
+    /// デプスマップから平面を取る場面では、対象面は必ずカメラの正面を向いています。
+    /// そこで `z = ax + by + c` の回帰（Z 方向の残差だけを最小化）を使います。
+    /// この定式化では法線が `(a, b, -1)` の形に固定されるため、**構造的に
+    /// 90° 回りようがありません。**
+    ///
+    /// 残差の MAD（中央絶対偏差）でロバストに外れ値を落とし、
+    /// 最後に残ったインライアへ `fit` を適用して平面性の指標も得ます。
+    ///
+    /// - Parameters:
+    ///   - outlierSigma: MAD から換算した標準偏差の何倍までを採用するか
+    ///   - residualFloor: しきい値の下限（m）。全点が完全に同一平面だと
+    ///     MAD が 0 になり、丸め誤差だけで点が落ちるのを防ぐ。
+    public static func fitRobust(
+        points: [Vec3],
+        iterations: Int = 4,
+        outlierSigma: Double = 3.0,
+        residualFloor: Double = 0.003
+    ) -> Result? {
+        guard points.count >= 8 else { return fit(points: points) }
+
         var current = points
-        var result = fit(points: current)
         for _ in 0..<iterations {
-            guard let r = result, r.rmsResidual > 1e-6 else { break }
-            let threshold = r.rmsResidual * outlierSigma
-            let filtered = current.filter { abs(r.plane.signedDistance(to: $0)) <= threshold }
-            guard filtered.count >= max(3, current.count / 4), filtered.count < current.count else { break }
-            current = filtered
-            result = fit(points: current)
+            guard let plane = solveDepthPlane(current) else { break }
+
+            var residuals = [Double]()
+            residuals.reserveCapacity(current.count)
+            for p in current {
+                residuals.append(p.z - (plane.a * p.x + plane.b * p.y + plane.c))
+            }
+
+            let center = median(residuals)
+            let mad = median(residuals.map { abs($0 - center) })
+            let threshold = max(1.4826 * mad * outlierSigma, residualFloor)
+
+            var kept = [Vec3]()
+            kept.reserveCapacity(current.count)
+            for (point, residual) in zip(current, residuals) where abs(residual - center) <= threshold {
+                kept.append(point)
+            }
+
+            // 落としすぎ / もう落ちない、のどちらかで打ち切る
+            guard kept.count >= max(3, points.count / 10), kept.count < current.count else { break }
+            current = kept
         }
-        return result
+
+        return fit(points: current)
+    }
+
+    /// `z = ax + by + c` の最小二乗解。
+    ///
+    /// 重心を引いてから解くことで、正規方程式が 2x2 に落ちて条件数も良くなります。
+    static func solveDepthPlane(_ points: [Vec3]) -> (a: Double, b: Double, c: Double)? {
+        let n = Double(points.count)
+        guard n >= 3 else { return nil }
+
+        var cx = 0.0, cy = 0.0, cz = 0.0
+        for p in points {
+            cx += p.x
+            cy += p.y
+            cz += p.z
+        }
+        cx /= n
+        cy /= n
+        cz /= n
+
+        var sxx = 0.0, sxy = 0.0, syy = 0.0, sxz = 0.0, syz = 0.0
+        for p in points {
+            let dx = p.x - cx
+            let dy = p.y - cy
+            let dz = p.z - cz
+            sxx += dx * dx
+            sxy += dx * dy
+            syy += dy * dy
+            sxz += dx * dz
+            syz += dy * dz
+        }
+
+        let det = sxx * syy - sxy * sxy
+        // 相対的な条件判定。ROI が一方向に潰れている（線状）と解けない。
+        guard det > 1e-9 * max(sxx * syy, 1e-12) else { return nil }
+
+        let a = (syy * sxz - sxy * syz) / det
+        let b = (sxx * syz - sxy * sxz) / det
+        let c = cz - a * cx - b * cy
+        return (a, b, c)
+    }
+
+    static func median(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        return sorted.count % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
 }
 

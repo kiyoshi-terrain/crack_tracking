@@ -78,7 +78,11 @@ final class GeometryTests: XCTestCase {
         XCTAssertEqual(abs(fit!.plane.normal.dot(normal)), 1.0, accuracy: 1e-6)
     }
 
-    func testRobustPlaneFitRejectsOutliers() {
+    /// 手前の障害物などでデプスが飛んだ点が混ざっても、壁面を取り違えないこと。
+    ///
+    /// PCA をそのまま使うと、外れ値で Z 方向の分散が X/Y の分散を超えた瞬間に
+    /// 最小固有ベクトルが入れ替わり、法線が 90° 回ります（7% の外れ値で発生）。
+    func testRobustPlaneFitRejectsOutliers() throws {
         let normal = Vec3(0, 0, -1)
         var points: [Vec3] = []
         for i in 0..<20 {
@@ -91,10 +95,92 @@ final class GeometryTests: XCTestCase {
             points.append(Vec3(Double(i) * 0.005, 0.1, 0.8))
         }
 
-        let robust = PlaneFitter.fitRobust(points: points)
-        XCTAssertNotNil(robust)
-        XCTAssertEqual(abs(robust!.plane.normal.dot(normal)), 1.0, accuracy: 1e-3)
-        XCTAssertEqual(robust!.plane.intersection(rayDirection: Vec3(0, 0, 1))!.z, 2.0, accuracy: 0.01)
+        let robust = try XCTUnwrap(PlaneFitter.fitRobust(points: points))
+        XCTAssertEqual(abs(robust.plane.normal.dot(normal)), 1.0, accuracy: 1e-3)
+        XCTAssertEqual(
+            try XCTUnwrap(robust.plane.intersection(rayDirection: Vec3(0, 0, 1))).z,
+            2.0,
+            accuracy: 0.01
+        )
+    }
+
+    /// 傾いた壁面 + 外れ値。正対のときだけ動く実装になっていないことを確認する。
+    func testRobustPlaneFitHandlesTiltedWallWithOutliers() throws {
+        let theta = 35.0 * Double.pi / 180
+        let truth = Vec3(-sin(theta), 0, -cos(theta))
+        let plane = Plane(point: Vec3(0, 0, 2.0), normal: truth)
+
+        var points: [Vec3] = []
+        for i in 0..<20 {
+            for j in 0..<20 {
+                let x = Double(i - 10) * 0.02
+                let y = Double(j - 10) * 0.02
+                let z = (plane.distance - truth.x * x - truth.y * y) / truth.z
+                points.append(Vec3(x, y, z))
+            }
+        }
+        for i in 0..<30 {
+            points.append(Vec3(Double(i) * 0.005, 0.1, 0.8))
+        }
+
+        let robust = try XCTUnwrap(PlaneFitter.fitRobust(points: points))
+        XCTAssertEqual(abs(robust.plane.normal.dot(truth)), 1.0, accuracy: 1e-3)
+    }
+
+    /// LiDAR 相当の測距ノイズ（σ=5mm）が乗っていても壁面姿勢が出ること。
+    func testRobustPlaneFitToleratesRangingNoise() throws {
+        let theta = 20.0 * Double.pi / 180
+        let truth = Vec3(-sin(theta), 0, -cos(theta))
+        let plane = Plane(point: Vec3(0, 0, 1.5), normal: truth)
+
+        // 再現性のための線形合同法（テストが実行ごとに揺れないように）
+        var seed: UInt64 = 12345
+        func noise() -> Double {
+            // 一様乱数を12個足して正規分布に近づける（Irwin-Hall）
+            var sum = 0.0
+            for _ in 0..<12 {
+                seed = seed &* 6364136223846793005 &+ 1442695040888963407
+                sum += Double(seed >> 40) / Double(1 << 24)
+            }
+            return (sum - 6.0) * 0.005
+        }
+
+        var points: [Vec3] = []
+        for i in 0..<20 {
+            for j in 0..<20 {
+                let x = Double(i - 10) * 0.02
+                let y = Double(j - 10) * 0.02
+                let z = (plane.distance - truth.x * x - truth.y * y) / truth.z
+                points.append(Vec3(x, y, z + noise()))
+            }
+        }
+        for i in 0..<30 {
+            points.append(Vec3(Double(i) * 0.005, 0.1, 0.8))
+        }
+
+        let robust = try XCTUnwrap(PlaneFitter.fitRobust(points: points))
+        XCTAssertEqual(abs(robust.plane.normal.dot(truth)), 1.0, accuracy: 0.02)
+        XCTAssertLessThan(robust.rmsResidual, 0.01)
+    }
+
+    /// 外れ値がない場合に、ロバスト版が通常版より劣化しないこと。
+    func testRobustPlaneFitMatchesPlainFitWithoutOutliers() throws {
+        let truth = Vec3(0.2, -0.3, -0.9).normalized
+        let plane = Plane(point: Vec3(0, 0, 1.5), normal: truth)
+
+        var points: [Vec3] = []
+        for i in 0..<20 {
+            for j in 0..<20 {
+                let x = Double(i - 10) * 0.02
+                let y = Double(j - 10) * 0.02
+                let z = (plane.distance - truth.x * x - truth.y * y) / truth.z
+                points.append(Vec3(x, y, z))
+            }
+        }
+
+        let robust = try XCTUnwrap(PlaneFitter.fitRobust(points: points))
+        XCTAssertEqual(abs(robust.plane.normal.dot(truth)), 1.0, accuracy: 1e-6)
+        XCTAssertEqual(robust.pointCount, points.count)
     }
 
     /// 「0.2mm を測るには何 m まで近づくか」の計算。

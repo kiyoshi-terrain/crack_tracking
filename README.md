@@ -25,7 +25,8 @@ iPhone の LiDAR とカメラで、構造物壁面のひび割れ幅を**実寸�
 - **LiDAR 搭載の iPhone / iPad**（iPhone 12 Pro 以降の Pro / Pro Max、iPad Pro）
   - LiDAR がないとスケールの基準が取れず、実寸計測ができません
 - iOS 17.0 以降
-- ビルド: Xcode 15 以降
+- ビルド: **Xcode 16 以降**（XcodeGen が生成する pbxproj が Xcode 16 形式のため。
+  Xcode 15 で開くと "future Xcode project file format" エラーになります）
 
 ---
 

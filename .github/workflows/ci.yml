@@ -8,7 +8,9 @@ on:
 jobs:
   crackcore-tests:
     name: CrackCore のテスト
-    runs-on: macos-14
+    # macos-14 の既定 Xcode は 15.4 で、最近の XcodeGen が生成する
+    # pbxproj 形式（objectVersion 77）を読めない。Xcode 16 系が必要。
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +23,9 @@ jobs:
 
   app-build:
     name: iOS アプリのビルド
-    runs-on: macos-14
+    # macos-14 の既定 Xcode は 15.4 で、最近の XcodeGen が生成する
+    # pbxproj 形式（objectVersion 77）を読めない。Xcode 16 系が必要。
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
