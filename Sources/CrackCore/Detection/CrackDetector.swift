@@ -74,7 +74,12 @@ public struct CrackDetector: Sendable {
     /// 画像全体からひび割れを検出して計測する。
     public func detect(in image: GrayImage, scale: SurfaceScale) -> Result {
         let prepared = prepare(image)
-        let field = RidgeDetector.compute(prepared.enhanced, scales: options.ridgeScales)
+        // 強調画像は「背景よりどれだけ暗いか」なので、ひび割れは明るい線になる。
+        let field = RidgeDetector.compute(
+            prepared.enhanced,
+            scales: options.ridgeScales,
+            polarity: .brightLine
+        )
         var mask = RidgeThresholder.mask(from: field, options: options.threshold)
         mask = Skeletonizer.thin(mask)
         let polylines = PolylineTracer.trace(mask, options: options.tracing)
@@ -96,7 +101,11 @@ public struct CrackDetector: Sendable {
     ) -> CrackMeasurement? {
         let prepared = prepare(image)
         let scaledPoint = point / Double(max(1, options.downsampleFactor))
-        let field = RidgeDetector.compute(prepared.enhanced, scales: options.ridgeScales)
+        let field = RidgeDetector.compute(
+            prepared.enhanced,
+            scales: options.ridgeScales,
+            polarity: .brightLine
+        )
         var mask = RidgeThresholder.mask(from: field, options: options.threshold)
         mask = Skeletonizer.thin(mask)
         guard let component = RidgeThresholder.component(

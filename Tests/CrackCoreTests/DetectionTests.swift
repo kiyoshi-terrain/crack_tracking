@@ -6,7 +6,7 @@ final class DetectionTests: XCTestCase {
     func testRidgeResponsePeaksOnTheCrackCenter() {
         let image = SyntheticImage.straightCrack(crackWidthPx: 3.0, blurSigma: 0.6)
         let enhanced = ImageFilters.darkTopHat(image, radius: 20)
-        let field = RidgeDetector.compute(enhanced)
+        let field = RidgeDetector.compute(enhanced, polarity: .brightLine)
 
         let cx = image.width / 2
         let cy = image.height / 2
@@ -21,10 +21,56 @@ final class DetectionTests: XCTestCase {
         XCTAssertEqual(abs(normal.x), 1.0, accuracy: 0.1)
     }
 
+    /// 極性を間違えると、リッジ検出は芯線ではなく線の**両脇**に応答する。
+    ///
+    /// `darkTopHat` の出力は「背景よりどれだけ暗いか」なので、
+    /// ひび割れは明るい線になる。ここに `.darkLine` を渡すと、
+    /// 芯（曲率が負）の応答が捨てられ、曲率が正になる両脇だけが残る。
+    /// 見た目には「それらしい線」が検出されるので気づきにくく、
+    /// 幅も位置も数 px ずれる。
+    func testRidgePolarityMustMatchTheInput() {
+        let image = SyntheticImage.straightCrack(crackWidthPx: 3.0, blurSigma: 0.6)
+        let enhanced = ImageFilters.darkTopHat(image, radius: 20)
+        let cx = image.width / 2
+        let cy = image.height / 2
+
+        let correct = RidgeDetector.compute(enhanced, polarity: .brightLine)
+        XCTAssertGreaterThan(correct.strengthValue(x: cx, y: cy), 0)
+
+        let wrong = RidgeDetector.compute(enhanced, polarity: .darkLine)
+        XCTAssertEqual(wrong.strengthValue(x: cx, y: cy), 0, "極性を誤ると芯線上の応答が消える")
+        // 両脇には応答が出てしまう
+        XCTAssertGreaterThan(wrong.strengthValue(x: cx - 4, y: cy), 0)
+    }
+
+    /// 検出された芯線が本当のひび割れ中心に乗っていること。
+    /// 芯線がずれると法線方向がずれ、幅が cos で過大に出る。
+    func testDetectedCenterlineLandsOnTheCrackCenter() throws {
+        let size = 200
+        let image = SyntheticImage.straightCrack(
+            width: size, height: size, crackWidthPx: 5.0, blurSigma: 0.5
+        )
+        let scale = SyntheticImage.frontoParallelScale(
+            imageWidth: size, imageHeight: size, focalPixels: 1000, distance: 0.1
+        )
+        var options = CrackDetector.Options.default
+        options.backgroundRadiusPx = 20
+        let result = CrackDetector(options: options).detect(in: image, scale: scale)
+
+        // 1本のひび割れが1本として検出されること（両脇に割れて2本にならない）
+        XCTAssertEqual(result.measurements.count, 1)
+
+        let trueCenterX = Double(size - 1) / 2
+        let crack = try XCTUnwrap(result.measurements.first)
+        for point in crack.centerline {
+            XCTAssertEqual(point.x, trueCenterX, accuracy: 1.0)
+        }
+    }
+
     func testNonMaximumSuppressionYieldsThinRidge() {
         let image = SyntheticImage.straightCrack(crackWidthPx: 4.0, blurSigma: 0.6)
         let enhanced = ImageFilters.darkTopHat(image, radius: 20)
-        let field = RidgeDetector.compute(enhanced)
+        let field = RidgeDetector.compute(enhanced, polarity: .brightLine)
         let mask = RidgeThresholder.mask(from: field)
 
         // 中央行で立っている画素は数個以内（太いまま残っていない）

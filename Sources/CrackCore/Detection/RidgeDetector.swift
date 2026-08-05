@@ -52,15 +52,33 @@ public struct RidgeField: Sendable {
 
 public enum RidgeDetector {
 
+    /// 探す線の明暗。
+    ///
+    /// **入力画像の極性に必ず合わせてください。** 間違えると芯線ではなく
+    /// 線の両脇（曲率の符号が反転する位置）に応答してしまい、
+    /// 1本のひび割れが 2本に割れて数 px ずれた位置に出ます。
+    ///
+    /// - `darkLine`: 明るい背景に暗い線（撮ったままの画像）
+    /// - `brightLine`: 暗い背景に明るい線（`ImageFilters.darkTopHat` の出力）
+    public enum Polarity: Sendable {
+        case darkLine
+        case brightLine
+    }
+
     /// 既定の解析スケール（px）。σ ≒ 線幅/2 程度が最も強く応答します。
     public static let defaultScales: [Double] = [1.0, 1.5, 2.2, 3.2, 4.5]
 
-    /// 暗い線状構造のリッジ応答を計算する。
+    /// 線状構造のリッジ応答を計算する。
     ///
     /// - Parameters:
-    ///   - image: グレースケール画像（0...1、ひび割れが暗い前提）
+    ///   - image: グレースケール画像（0...1）
     ///   - scales: 解析する σ の配列
-    public static func compute(_ image: GrayImage, scales: [Double] = defaultScales) -> RidgeField {
+    ///   - polarity: 探す線の明暗。入力画像に合わせること。
+    public static func compute(
+        _ image: GrayImage,
+        scales: [Double] = defaultScales,
+        polarity: Polarity = .darkLine
+    ) -> RidgeField {
         var field = RidgeField(width: image.width, height: image.height)
         guard !image.isEmpty else { return field }
 
@@ -81,14 +99,16 @@ public enum RidgeDetector {
                 let lambda1 = mean + disc   // 絶対値が大きい方（|λ1| >= |λ2| とは限らないので下で判定）
                 let lambda2 = mean - disc
 
-                // 暗い線 → 線を横切る方向の2階微分が正で大きい
+                // 絶対値の大きい固有値が「線を横切る方向」の曲率。
+                // 暗い線ならこれが正、明るい線なら負になる。
                 let major = abs(lambda1) >= abs(lambda2) ? lambda1 : lambda2
                 let minor = abs(lambda1) >= abs(lambda2) ? lambda2 : lambda1
-                guard major > 0 else { continue }
+                let signedStrength = polarity == .darkLine ? major : -major
+                guard signedStrength > 0 else { continue }
 
-                // 異方性: 線状なら |minor| << major。塊状のノイズを抑制する。
-                let anisotropy = 1 - min(1, abs(minor) / max(major, 1e-8))
-                let response = major * anisotropy
+                // 異方性: 線状なら |minor| << |major|。塊状のノイズを抑制する。
+                let anisotropy = 1 - min(1, abs(minor) / max(abs(major), 1e-8))
+                let response = signedStrength * anisotropy
 
                 if response > field.strength[i] {
                     field.strength[i] = response

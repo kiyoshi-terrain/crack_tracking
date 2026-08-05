@@ -84,6 +84,19 @@ Mac 上（および CI）で動かせるようにしています。
 変換は `DepthPlaneEstimator.worldPosition(ofCameraPoint:frame:)` の一箇所に集約してあります。
 ここを介さずに直接変換を書かないでください（Y/Z の符号を落として上下逆になります）。
 
+### リッジ検出の極性の約束
+
+もう一つ、静かに間違いやすい箇所です。
+
+`ImageFilters.darkTopHat` の出力は「背景よりどれだけ暗いか」なので、
+**入力で暗かったひび割れは出力では明るい線になります。**
+そのため `RidgeDetector.compute` には `polarity: .brightLine` を渡します。
+
+`.darkLine` のまま渡すと、芯線（曲率が負）の応答が捨てられ、
+曲率が正になる**線の両脇**だけが残ります。見た目には「それらしい線」が
+2本検出されるため気づきにくく、位置が数 px ずれます。
+`testRidgePolarityMustMatchTheInput` がこれを固定しています。
+
 ---
 
 ## 計測と 3D モデルの役割分担

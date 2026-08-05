@@ -93,6 +93,11 @@ public enum ImageFilters {
     /// コンクリート壁面は照明ムラ・打ち継ぎ・型枠跡で輝度が大きく変動します。
     /// 大きな半径のブラーを「背景」とみなして差分を取ると、細い暗線だけが残ります。
     /// 出力は「背景よりどれだけ暗いか」（0以上）。
+    ///
+    /// **極性が反転することに注意。** 入力では暗かったひび割れが、
+    /// 出力では明るい線になります。この出力を `RidgeDetector` に渡すときは
+    /// 必ず `polarity: .brightLine` を指定してください
+    /// （`.darkLine` のままだと芯線ではなく線の両脇に応答します）。
     public static func darkTopHat(_ image: GrayImage, radius: Int) -> GrayImage {
         let background = boxBlur(image, radius: radius)
         var out = GrayImage(width: image.width, height: image.height)
