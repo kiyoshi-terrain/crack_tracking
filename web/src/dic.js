@@ -67,12 +67,21 @@ function extractSubset(img, cx, cy, half, dx = 0, dy = 0) {
  * @returns {{dx:number, dy:number, zncc:number}|null}
  */
 export function integerSearch(reference, target, cx, cy, half, range) {
+  return integerSearchAround(reference, target, cx, cy, half, range, 0, 0);
+}
+
+/** 中心を (offsetX, offsetY) だけずらした整数探索。 */
+export function integerSearchAround(reference, target, cx, cy, half, range, offsetX, offsetY) {
   const ref = extractSubset(reference, cx, cy, half);
   if (ref.norm < 1e-9) return null; // 平坦すぎて手がかりがない
 
+  const ox = Math.round(offsetX);
+  const oy = Math.round(offsetY);
   let best = { dx: 0, dy: 0, zncc: -2 };
-  for (let dy = -range; dy <= range; dy++) {
-    for (let dx = -range; dx <= range; dx++) {
+  for (let sy = -range; sy <= range; sy++) {
+    for (let sx = -range; sx <= range; sx++) {
+      const dx = ox + sx;
+      const dy = oy + sy;
       const cur = extractSubset(target, cx, cy, half, dx, dy);
       if (cur.norm < 1e-9) continue;
       let dot = 0;
@@ -175,6 +184,60 @@ export function refineSubpixel(reference, target, cx, cy, half, dx0, dy0, option
 }
 
 /**
+ * 画像全体のおおまかなずれを求める（階層的アライメントの1段目）。
+ *
+ * 三脚なら数 px ですが、手持ちだと数百 px ずれます。そのまま各測点で
+ * 広範囲を全探索すると計算量が爆発するので、縮小画像で先に当たりを付けます。
+ *
+ * @param {Gray} reference
+ * @param {Gray} target
+ * @param {(img:Gray, factor:number)=>Gray} downsample 縮小関数（image.js のものを渡す）
+ * @returns {{dx:number, dy:number, factor:number, confidence:number}}
+ */
+export function estimateGlobalShift(reference, target, downsample, options = {}) {
+  const maxShift = options.maxShiftPx ?? 400;
+  const factor = Math.max(1, Math.round((options.coarseSide ?? 400) > 0
+    ? Math.max(1, Math.min(reference.width, reference.height) / (options.coarseSide ?? 400))
+    : 1));
+
+  const smallRef = downsample(reference, factor);
+  const smallTgt = downsample(target, factor);
+  const range = Math.max(2, Math.ceil(maxShift / factor));
+  const half = Math.max(8, Math.floor(Math.min(smallRef.width, smallRef.height) / 6));
+
+  // 中央と四隅寄りの5点で探索し、中央値を採る（局所的な動きに引きずられないため）
+  const probes = [
+    [0.5, 0.5],
+    [0.3, 0.3],
+    [0.7, 0.3],
+    [0.3, 0.7],
+    [0.7, 0.7],
+  ];
+  const results = [];
+  for (const [fx, fy] of probes) {
+    const cx = Math.round(smallRef.width * fx);
+    const cy = Math.round(smallRef.height * fy);
+    if (cx - half - range < 0 || cy - half - range < 0) continue;
+    if (cx + half + range >= smallRef.width || cy + half + range >= smallRef.height) continue;
+    const found = integerSearch(smallRef, smallTgt, cx, cy, half, range);
+    if (found && found.zncc > 0.5) results.push(found);
+  }
+  if (!results.length) return { dx: 0, dy: 0, factor, confidence: 0 };
+
+  const median = (values) => {
+    const s = [...values].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  return {
+    dx: median(results.map((r) => r.dx)) * factor,
+    dy: median(results.map((r) => r.dy)) * factor,
+    factor,
+    confidence: median(results.map((r) => r.zncc)),
+  };
+}
+
+/**
  * 格子状に変位を計測する。
  *
  * @param {Gray} reference 基準画像
@@ -184,6 +247,7 @@ export function refineSubpixel(reference, target, cx, cy, half, dx0, dy0, option
  * @param {number} options.step 測点の間隔[px]
  * @param {number} options.searchRange 整数探索の範囲[px]
  * @param {number} options.minZNCC これ未満の相関の測点は捨てる
+ * @param {{dx:number,dy:number}} [options.initialShift] 粗いアライメントの結果
  * @param {{x:number,y:number,width:number,height:number}} [options.region] 解析範囲
  * @returns {{points:Array<{x:number,y:number,u:number,v:number,zncc:number}>, rejected:number}}
  */
@@ -192,6 +256,7 @@ export function measureDisplacementField(reference, target, options = {}) {
   const step = options.step ?? 20;
   const searchRange = options.searchRange ?? 4;
   const minZNCC = options.minZNCC ?? 0.8;
+  const initial = options.initialShift ?? { dx: 0, dy: 0 };
 
   const margin = subsetHalf + searchRange + 2;
   const region = options.region ?? {
@@ -201,17 +266,34 @@ export function measureDisplacementField(reference, target, options = {}) {
     height: reference.height,
   };
 
-  const x0 = Math.max(margin, region.x);
-  const y0 = Math.max(margin, region.y);
-  const x1 = Math.min(reference.width - margin, region.x + region.width);
-  const y1 = Math.min(reference.height - margin, region.y + region.height);
+  // 粗いアライメント分ずらした先が画像内に収まる範囲だけを解析する。
+  // ここを忘れると、2枚が重なっていない縁の部分でも「相関が取れたふり」をして
+  // （端でクランプされた画素を掴んで）もっともらしい外れ値を返す。
+  // 手持ち撮影では必ず起きる。
+  const shiftX = Math.round(initial.dx);
+  const shiftY = Math.round(initial.dy);
+  const x0 = Math.max(margin, region.x, margin - shiftX);
+  const y0 = Math.max(margin, region.y, margin - shiftY);
+  const x1 = Math.min(
+    reference.width - margin,
+    region.x + region.width,
+    target.width - margin - shiftX
+  );
+  const y1 = Math.min(
+    reference.height - margin,
+    region.y + region.height,
+    target.height - margin - shiftY
+  );
 
   const points = [];
   let rejected = 0;
 
   for (let y = y0; y < y1; y += step) {
     for (let x = x0; x < x1; x += step) {
-      const coarse = integerSearch(reference, target, x, y, subsetHalf, searchRange);
+      // 粗いアライメントの分だけ探索窓をずらす（手持ち撮影で数百px ずれても追える）
+      const coarse = integerSearchAround(
+        reference, target, x, y, subsetHalf, searchRange, initial.dx, initial.dy
+      );
       if (!coarse) {
         rejected++;
         continue;

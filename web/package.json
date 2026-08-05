@@ -1,0 +1,11 @@
+{
+  "name": "crack-sigma",
+  "version": "0.1.0",
+  "description": "き裂追跡測定の測定ノイズ(σ)実測ツール",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test/run.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}
