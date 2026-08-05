@@ -54,11 +54,14 @@ actor PhotogrammetryRunner {
     }
 
     /// 進捗（0...1）を流しながらモデルを生成する。
+    ///
+    /// `onProgress` はこのアクター上から呼ばれます。UI を更新する場合は
+    /// 呼び出し側で MainActor へホップしてください。
     func generateModel(
         imagesDirectory: URL,
         outputURL: URL,
         detail: Detail = .medium,
-        onProgress: @Sendable @escaping (Double) -> Void
+        onProgress: @escaping (Double) -> Void
     ) async throws {
         guard PhotogrammetrySession.isSupported else { throw RunnerError.unsupportedDevice }
 

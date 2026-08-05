@@ -1,7 +1,7 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import CrackCore
 
+@MainActor
 struct ProjectDetailView: View {
     @State private var project: InspectionProject
     @EnvironmentObject private var store: ProjectStore

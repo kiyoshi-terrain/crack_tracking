@@ -3,6 +3,10 @@ import SwiftUI
 import CrackCore
 
 /// 撮影・計測のメイン画面。
+///
+/// `ARCaptureController` / `MeasureViewModel` はどちらも `@MainActor` なので、
+/// 画面側も MainActor に固定して `Task {}` が正しくホップするようにしている。
+@MainActor
 struct CaptureView: View {
     @Binding var project: InspectionProject
     let memberName: String
