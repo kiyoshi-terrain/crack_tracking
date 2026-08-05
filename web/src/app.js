@@ -11,6 +11,7 @@ import { estimateGlobalShift, measureDisplacementField } from './dic.js';
 import { fitAffine, fitHomography, residuals } from './transform.js';
 import { summarize, detectionLimit, computeGSD, focalLengthPxFrom35mm } from './sigma.js';
 import { speckleQuality, focusScore } from './speckle.js';
+import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -180,8 +181,16 @@ function setupScale() {
 }
 $('distance').addEventListener('input', updateGSD);
 $('focal35').addEventListener('input', updateGSD);
+$('referenceLength').addEventListener('input', updateGSD);
+$('referencePair').addEventListener('change', updateGSD);
 
 function currentGSD() {
+  // 既知の基準距離があればそちらを優先する。
+  // レーザー距離計も焦点距離も要らず、印刷倍率やレンズの個体差も吸収できるため。
+  const referenceMM = parseFloat($('referenceLength').value);
+  const referencePx = parseFloat($('referencePair').value);
+  if (referenceMM > 0 && referencePx > 0) return referenceMM / referencePx;
+
   const distance = parseFloat($('distance').value);
   const focal35 = parseFloat($('focal35').value);
   if (!(distance > 0) || !(focal35 > 0)) return null;
@@ -278,11 +287,26 @@ async function analyze() {
   const subsetHalf = clampInt($('subsetHalf').value, 5, 60, 15);
   const step = clampInt($('step').value, 8, 200, 25);
   const useHomography = $('model').value === 'homography';
+  const method = $('method').value;
   const roi = state.roi;
 
   log('基準画像を準備中…');
   await tick();
   const reference = toGray(state.files[0].imageData, roi, channel, true);
+
+  if (method === 'targets' || method === 'both') {
+    await analyzeTargets(reference, channel, roi);
+  } else {
+    $('targetResults').innerHTML = '';
+  }
+
+  if (method === 'targets') {
+    $('quality').innerHTML = '';
+    $('frameTable').innerHTML = '';
+    $('results').classList.remove('hidden');
+    log('');
+    return;
+  }
 
   const quality = speckleQuality(reference, { subsetHalf });
   renderQuality(quality);
@@ -359,6 +383,131 @@ async function analyze() {
   renderFrameTable(perFrame, gsd, frames, overall);
   if (lastField) drawField(lastField);
   $('results').classList.remove('hidden');
+}
+
+/**
+ * ターゲット方式の解析。
+ *
+ * 各フレームでターゲットを検出し、基準フレームと対応付けたうえで
+ * 全ターゲット対の距離を求めます。同じ対の距離が枚ごとにどれだけばらつくかが
+ * そのまま測定ノイズです。
+ *
+ * 既知量を動かして撮った場合は、距離の系列に段差として現れます。
+ */
+async function analyzeTargets(reference, channel, roi) {
+  log('ターゲットを検出中…');
+  await tick();
+
+  const referenceTargets = detectTargets(reference, { backgroundRadius: 60 });
+  if (referenceTargets.length < 2) {
+    $('targetResults').innerHTML = `<div class="banner bad">
+      基準画像からターゲットを ${referenceTargets.length} 点しか検出できませんでした。
+      解析範囲にターゲット全体が入っているか、白地に黒丸として写っているか確認してください。
+    </div>`;
+    return;
+  }
+
+  // 各フレームで検出 → 基準と対応付け → 対ごとの距離
+  const referencePairs = pairwiseDistances(referenceTargets);
+  const series = referencePairs.map(() => []);
+  const perFrame = [];
+
+  for (let f = 0; f < state.files.length; f++) {
+    log(`ターゲット解析中… ${f + 1} / ${state.files.length} 枚`);
+    await tick();
+
+    const gray = f === 0 ? reference : toGray(state.files[f].imageData, roi, channel, true);
+    const found = f === 0 ? referenceTargets : detectTargets(gray, { backgroundRadius: 60 });
+    const shift =
+      f === 0 ? { dx: 0, dy: 0 } : estimateGlobalShift(reference, gray, downsample, { maxShiftPx: 300 });
+    const matches = f === 0
+      ? referenceTargets.map((t, i) => ({ a: t, b: t, index: i }))
+      : matchTargets(referenceTargets, found, shift, Math.max(30, 0.5 * (found[0]?.radius ?? 10) * 6));
+
+    const byIndex = new Map(matches.map((m) => [m.index, m.b]));
+    perFrame.push({ frame: f, detected: found.length, matched: matches.length });
+
+    referencePairs.forEach((pair, k) => {
+      const a = byIndex.get(pair.i);
+      const b = byIndex.get(pair.j);
+      series[k].push(a && b ? Math.hypot(a.x - b.x, a.y - b.y) : NaN);
+    });
+  }
+
+  // 基準ペアの選択肢を用意（既知距離からスケールを決めるため）
+  const select = $('referencePair');
+  select.innerHTML =
+    '<option value="">選択しない</option>' +
+    referencePairs
+      .map((p, k) => `<option value="${p.distance}">対 ${p.i + 1}–${p.j + 1}（${p.distance.toFixed(2)} px）</option>`)
+      .join('');
+  $('referenceScale').classList.remove('hidden');
+
+  const gsd = currentGSD();
+  const rows = referencePairs.map((pair, k) => {
+    const values = series[k].filter((v) => isFinite(v));
+    const mean = values.reduce((s, v) => s + v, 0) / Math.max(1, values.length);
+    const sigma = robustSigmaOf(values);
+    const span = values.length ? Math.max(...values) - Math.min(...values) : 0;
+    return { pair, values, mean, sigma, span };
+  });
+
+  const validSigmas = rows.map((r) => r.sigma).filter((s) => isFinite(s) && s > 0).sort((a, b) => a - b);
+  const medianSigma = validSigmas.length ? validSigmas[validSigmas.length >> 1] : NaN;
+
+  const detectionRow = perFrame
+    .map((p) => `<tr><td>${p.frame === 0 ? '基準' : p.frame}</td>
+      <td class="num">${p.detected}</td><td class="num">${p.matched}</td></tr>`)
+    .join('');
+
+  const pairRows = rows
+    .map((r) => {
+      const mm = gsd ? ` (${(r.mean * gsd).toFixed(3)} mm)` : '';
+      const sigmaMM = gsd && isFinite(r.sigma) ? ` (${(r.sigma * gsd).toFixed(4)} mm)` : '';
+      const spanMM = gsd ? ` (${(r.span * gsd).toFixed(4)} mm)` : '';
+      return `<tr>
+        <td>${r.pair.i + 1}–${r.pair.j + 1}</td>
+        <td class="num">${r.mean.toFixed(3)}${mm}</td>
+        <td class="num">${isFinite(r.sigma) ? r.sigma.toFixed(4) + sigmaMM : '—'}</td>
+        <td class="num">${r.span.toFixed(4)}${spanMM}</td>
+        <td class="num" style="font-size:11px">${r.values.map((v) => v.toFixed(3)).join(', ')}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const limitMM = gsd && isFinite(medianSigma) ? 3 * Math.SQRT2 * medianSigma * gsd : null;
+
+  $('targetResults').innerHTML = `
+    <h2 style="margin-top:20px">ターゲット方式</h2>
+    <div class="banner ${referenceTargets.length >= 4 ? 'good' : 'warn'}">
+      基準画像で <strong>${referenceTargets.length} 点</strong>のターゲットを検出。
+      対ごとの距離の σ（中央値）= <strong>${isFinite(medianSigma) ? medianSigma.toFixed(4) : '—'} px</strong>
+      ${gsd && isFinite(medianSigma) ? ` = ${(medianSigma * gsd).toFixed(4)} mm` : ''}
+      ${limitMM ? `／ 検出限界 3σ = <strong>${limitMM.toFixed(4)} mm</strong>` : ''}
+    </div>
+    <table style="margin-bottom:12px">
+      <tr><th>枚</th><th class="num">検出</th><th class="num">対応付け</th></tr>
+      ${detectionRow}
+    </table>
+    <table>
+      <tr><th>対</th><th class="num">平均距離</th><th class="num">σ</th><th class="num">最大−最小</th><th class="num">各枚の値(px)</th></tr>
+      ${pairRows}
+    </table>
+    <p class="note">既知量を動かして撮った場合、「各枚の値」に段差として現れます。
+    その段差が既知量と一致すれば、計測系が正しく動いている証拠になります。
+    段差を σ と混同しないよう、動かす前後は別々に解析してください。</p>
+  `;
+}
+
+function robustSigmaOf(values) {
+  if (values.length < 2) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const med = sorted[sorted.length >> 1];
+  const deviations = values.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
+  const mad = deviations[deviations.length >> 1];
+  if (mad > 0) return 1.4826 * mad;
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  return Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / (values.length - 1));
 }
 
 function renderQuality(q) {

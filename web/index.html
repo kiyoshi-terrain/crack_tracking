@@ -114,6 +114,22 @@
       </div>
     </div>
     <p class="note">距離が未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
+
+    <div id="referenceScale" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+      <label style="margin-bottom:8px">既知の基準距離からスケールを決める（ターゲット方式・こちらが高精度）</label>
+      <div class="grid">
+        <div>
+          <label>基準にするターゲット対</label>
+          <select id="referencePair"></select>
+        </div>
+        <div>
+          <label>その実距離（mm）— ノギスの実測値</label>
+          <input type="number" id="referenceLength" step="0.01" min="1" placeholder="例: 119.62">
+        </div>
+      </div>
+      <p class="note">レーザー距離計も焦点距離も不要になり、印刷倍率の誤差も吸収できます。
+      写真に基準が写っているので後から検証もできます。</p>
+    </div>
   </section>
 
   <section id="roiSection" class="hidden">
@@ -133,6 +149,14 @@
         <select id="model">
           <option value="affine">アフィン（三脚・連写）</option>
           <option value="homography">ホモグラフィ（手持ち・別日）</option>
+        </select>
+      </div>
+      <div>
+        <label>解析方式</label>
+        <select id="method">
+          <option value="dic">DIC（自然模様）</option>
+          <option value="targets">ターゲット（円形マーカー）</option>
+          <option value="both">両方（併走して比較）</option>
         </select>
       </div>
     </div>
@@ -162,6 +186,7 @@
       </div>
     </div>
     <div id="frameTable"></div>
+    <div id="targetResults"></div>
     <h2 style="margin-top:20px">残差ベクトル（カメラの動きを差し引いた残り）</h2>
     <canvas id="fieldCanvas" style="max-width:100%;background:#0d1017;border-radius:6px"></canvas>
     <p class="note" id="fieldNote"></p>

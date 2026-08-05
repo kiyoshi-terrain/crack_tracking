@@ -8,6 +8,7 @@ import { fitAffine, applyAffine, residuals } from '../src/transform.js';
 import { summarize, detectionLimit } from '../src/sigma.js';
 import { speckleQuality, focusScore } from '../src/speckle.js';
 import { makeBlobs, renderBlobs } from './synthetic.mjs';
+import { runTargetTests } from './targets.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -217,6 +218,8 @@ console.log('\n== ピント判定（模様の有無と切り分けられるか�
     `MIG=${qSoft.mig.toFixed(5)} 判定=${qSoft.verdict}`
   );
 }
+
+runTargetTests(check, near);
 
 console.log(`\n${passed} 件成功 / ${failed} 件失敗`);
 process.exit(failed === 0 ? 0 : 1);
