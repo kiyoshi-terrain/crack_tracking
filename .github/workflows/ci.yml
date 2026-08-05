@@ -35,10 +35,14 @@ jobs:
       - name: プロジェクトを生成
         run: xcodegen generate
 
-      - name: シミュレータ向けにビルド
+      # 実機向けにビルドする。シミュレータ SDK には Object Capture など
+      # 一部の API が無く、実際に配布する構成とも食い違うため。
+      # -quiet を付けないと、エラー本文が xcodebuild の冗長出力に埋もれる。
+      - name: 実機向けにビルド
         run: |
           xcodebuild build \
             -project CrackScan.xcodeproj \
             -scheme CrackScan \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
+            -destination 'generic/platform=iOS' \
+            -quiet \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO

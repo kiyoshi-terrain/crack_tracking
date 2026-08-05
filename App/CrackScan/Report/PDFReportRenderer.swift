@@ -6,6 +6,10 @@ import CrackCore
 ///
 /// 現場で撮ってその場で提出できることを狙って、
 /// 一覧表 + 各ひび割れの写真付き明細という一般的な調書構成にしています。
+///
+/// UIKit の描画コンテキストを使い、`@MainActor` の `ProjectStore` から
+/// 写真のパスを引くため、この型自体も MainActor に固定しています。
+@MainActor
 struct PDFReportRenderer {
 
     /// A4 縦（72dpi ポイント）
