@@ -160,7 +160,10 @@ extension CrackRecord {
         scale: SurfaceScale,
         photoRelativePath: String? = nil
     ) {
-        let representative = measurement.centerline[measurement.centerline.count / 2]
+        // 代表点は芯線の中央。撮影距離・入射角はここの値を記録する。
+        let representative = measurement.centerline.isEmpty
+            ? Vec2(Double(scale.intrinsics.imageWidth) / 2, Double(scale.intrinsics.imageHeight) / 2)
+            : measurement.centerline[measurement.centerline.count / 2]
         self.init(
             id: measurement.id,
             label: label,

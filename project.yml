@@ -1,0 +1,102 @@
+# XcodeGen 用のプロジェクト定義。
+#   brew install xcodegen && xcodegen generate
+# で CrackScan.xcodeproj を生成します。
+#
+# .xcodeproj をリポジトリに入れないのは、pbxproj のコンフリクト解決が
+# 現実的でないためです。プロジェクト定義はこの1ファイルに集約します。
+#
+# CrackCore は Xcode 上では framework ターゲットとしてビルドします
+# （ルートの Package.swift は `swift test` を CI で直接回すためのもので、
+#  両者が同じ Sources/CrackCore を参照します）。
+name: CrackScan
+options:
+  bundleIdPrefix: jp.example.crackscan
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: ja
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "" # 実機で動かす際に自分の Team ID を設定してください
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  # 計測アルゴリズム層。ARKit / UIKit に依存しない。
+  CrackCore:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Sources/CrackCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.example.crackscan.core
+        PRODUCT_NAME: CrackCore
+        DEFINES_MODULE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  CrackScan:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/CrackScan
+    dependencies:
+      - target: CrackCore
+        embed: true
+    info:
+      path: App/CrackScan/Info.plist
+      properties:
+        CFBundleDisplayName: 亀裂スキャン
+        CFBundleDevelopmentRegion: ja
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities:
+          - arkit
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSCameraUsageDescription: 構造物のひび割れを撮影・計測するためにカメラを使用します。
+        NSPhotoLibraryAddUsageDescription: 撮影した写真と点検調書を写真ライブラリに保存します。
+        NSLocationWhenInUseUsageDescription: 撮影位置を点検記録に残すために位置情報を使用します。
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.example.crackscan
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  # Xcode から計測ロジックのテストを走らせたいとき用。
+  # CI では `swift test` を使うので、こちらは開発時の利便性のため。
+  CrackCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/CrackCoreTests
+    dependencies:
+      - target: CrackCore
+
+schemes:
+  CrackScan:
+    build:
+      targets:
+        CrackScan: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  CrackCore:
+    build:
+      targets:
+        CrackCore: all
+        CrackCoreTests: [test]
+    test:
+      config: Debug
+      targets:
+        - CrackCoreTests

@@ -184,7 +184,12 @@ public enum PolylineTracer {
                 stack.append((index, end))
             }
         }
-        return zip(points, keep).compactMap { $1 ? $0 : nil }
+        var out: [Vec2] = []
+        out.reserveCapacity(points.count)
+        for (index, point) in points.enumerated() where keep[index] {
+            out.append(point)
+        }
+        return out
     }
 
     static func perpendicularDistance(_ p: Vec2, from a: Vec2, to b: Vec2) -> Double {

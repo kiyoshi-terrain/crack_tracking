@@ -94,14 +94,24 @@ public enum RidgeDetector {
                     field.strength[i] = response
                     field.scale[i] = Float(sigma)
 
-                    // major に対応する固有ベクトル = 線を横切る方向
-                    var nx = b
-                    var ny = major - a
-                    if abs(nx) < 1e-12 && abs(ny) < 1e-12 {
-                        nx = 1
-                        ny = 0
+                    // major に対応する固有ベクトル = 線を横切る方向。
+                    // b ≒ 0 のときは行列が対角なので固有ベクトルは軸に一致する。
+                    // 一般式 (b, λ-a) をそのまま使うと 0/0 になって向きが暴れるため分ける。
+                    let nx: Float
+                    let ny: Float
+                    if abs(b) <= 1e-9 {
+                        if abs(a) >= abs(c) {
+                            nx = 1
+                            ny = 0
+                        } else {
+                            nx = 0
+                            ny = 1
+                        }
+                    } else {
+                        nx = b
+                        ny = major - a
                     }
-                    let len = (nx * nx + ny * ny).squareRoot()
+                    let len = max((nx * nx + ny * ny).squareRoot(), 1e-12)
                     field.normalX[i] = nx / len
                     field.normalY[i] = ny / len
                 }
