@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模擬き裂 ターゲットシート — 原寸印刷用</title>
+<style>
+  /* 製図の語彙で組む。用紙は白地に黒、周辺は方眼紙寄りのニュートラル。
+     赤は寸法の指示線（赤鉛筆）に限って使う。 */
+  :root {
+    --ground: #f2f3f4;
+    --panel: #fbfbfb;
+    --ink: #16181d;
+    --ink-soft: #5c6270;
+    --rule: #d6d8dc;
+    --mark: #b03a2e;   /* 赤鉛筆 = 要確認・寸法指示 */
+    --verify: #2f6f5e; /* 器具の緑 = 検証済み */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #14161a; --panel: #1b1e24; --ink: #e8eaee;
+      --ink-soft: #99a0ac; --rule: #2c313a;
+      --mark: #e2725c; --verify: #5cbfa4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a; --panel: #1b1e24; --ink: #e8eaee;
+    --ink-soft: #99a0ac; --rule: #2c313a;
+    --mark: #e2725c; --verify: #5cbfa4;
+  }
+  :root[data-theme="light"] {
+    --ground: #f2f3f4; --panel: #fbfbfb; --ink: #16181d;
+    --ink-soft: #5c6270; --rule: #d6d8dc;
+    --mark: #b03a2e; --verify: #2f6f5e;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    line-height: 1.7;
+  }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .wrap {
+    max-width: 1180px; margin: 0 auto; padding: 32px 24px 72px;
+    display: grid; grid-template-columns: minmax(320px, 400px) 1fr; gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; gap: 28px; } }
+
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; }
+  .lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 24px; }
+
+  .eyebrow {
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 28px 0 10px; font-weight: 600;
+  }
+  .eyebrow:first-of-type { margin-top: 0; }
+
+  .callout {
+    border-left: 3px solid var(--mark); padding: 12px 14px; margin: 0 0 20px;
+    background: color-mix(in srgb, var(--mark) 7%, transparent);
+    font-size: 14px;
+  }
+  .callout strong { color: var(--mark); }
+
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step; position: relative;
+    padding: 0 0 14px 34px; font-size: 14px;
+  }
+  ol.steps li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute; left: 0; top: 1px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--mark); font-weight: 600;
+  }
+  ol.steps li em { font-style: normal; color: var(--verify); font-weight: 600; }
+
+  dl.spec { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13.5px; }
+  dl.spec dt { color: var(--ink-soft); }
+  dl.spec dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+  button.print {
+    appearance: none; border: 1px solid var(--ink); background: var(--ink); color: var(--ground);
+    font: inherit; font-size: 14px; font-weight: 600; padding: 11px 22px; border-radius: 4px;
+    cursor: pointer; margin-bottom: 18px;
+  }
+  button.print:hover { opacity: .88; }
+  button.print:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+
+  .sheet-frame {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 14px; overflow-x: auto;
+  }
+  /* 用紙は常に白地に黒。テーマで反転させない（計測対象なので） */
+  .sheet {
+    width: 210mm; height: 297mm; background: #fff; display: block;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  .sheet-frame .scaler { transform-origin: top left; }
+
+  a { color: var(--mark); }
+
+  @media print {
+    @page { size: A4 portrait; margin: 0; }
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .wrap { display: block; max-width: none; margin: 0; padding: 0; }
+    .sheet-frame { border: 0; padding: 0; background: #fff; overflow: visible; }
+    .sheet-frame .scaler { transform: none !important; }
+    .sheet { box-shadow: none; width: 210mm; height: 297mm; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="no-print">
+    <h1>模擬き裂 ターゲットシート</h1>
+    <p class="lede">
+      実物のターゲットを構造物に設置する前に、<strong>既知量を動かして計測系が正しく動くか</strong>を
+      机上で検証するための原寸シートです。
+    </p>
+
+    <button class="print" onclick="window.print()">印刷する</button>
+
+    <div class="callout">
+      <strong>必ず原寸（100%）で印刷してください。</strong>
+      プリンタの既定は「用紙に合わせる」で約96%に縮みます。
+      印刷後、シート上のスケールバーを定規で測って
+      <span class="mono">100.0mm</span> であることを確認してください。
+    </div>
+
+    <p class="eyebrow">手順</p>
+    <ol class="steps">
+      <li>破線で切り、<strong>固定側 A</strong> だけを壁や板にしっかり貼る。この3点が剛体基準になり、カメラの動きはここから除去されます</li>
+      <li><strong>可動側 B</strong> を隣に、隙間を空けて仮止めする</li>
+      <li>A1–A3 の実距離を<em>ノギスで実測</em>する。印刷倍率の誤差を吸収するため、設計値ではなく実測値を使います</li>
+      <li>動かさずに 10〜20 枚撮る → <em>σ（測定ノイズ）</em>が出ます</li>
+      <li>B側だけを既知量ずらす。すきまゲージ 0.10mm 等を挟むのが確実です</li>
+      <li>もう 10 枚撮り、ツールが<em>その既知量を当てられるか</em>確認する</li>
+    </ol>
+
+    <p class="eyebrow">ツール側の設定</p>
+    <dl class="spec">
+      <dt>解析方式</dt><dd>ターゲット／両方</dd>
+      <dt>基準距離</dt><dd>A1–A3 の実測値[mm]</dd>
+      <dt>ターゲット径</dt><dd>15.0 mm</dd>
+      <dt>設計間隔</dt><dd>120.0 mm（縦・横とも）</dd>
+    </dl>
+    <p style="font-size:13px;color:var(--ink-soft);margin-top:14px">
+      「両方」を選ぶと DIC と併走します。両者が食い違えば、
+      ターゲットが浮いている（接着不良）疑いがあります。
+    </p>
+
+    <p class="eyebrow">段差とσを混同しないこと</p>
+    <p style="font-size:13.5px;margin:0">
+      動かす前と後をまとめて解析すると、段差の分だけ σ が膨らみます。
+      <strong>前後は別々に解析</strong>してください。
+    </p>
+  </div>
+
+  <div class="sheet-frame">
+    <div class="scaler">
+      <svg class="sheet" viewBox="0 0 210 297" xmlns="http://www.w3.org/2000/svg">
+        <rect width="210" height="297" fill="#fff"/>
+
+        <text x="105" y="15" font-family="sans-serif" font-size="5" font-weight="bold"
+              text-anchor="middle" fill="#000">模擬き裂 ターゲットシート</text>
+        <text x="105" y="21.5" font-family="sans-serif" font-size="3"
+              text-anchor="middle" fill="#444">A4 原寸印刷／ターゲット径 15.0mm／設計間隔 120.0mm</text>
+
+        <!-- 印刷倍率の検証 -->
+        <g stroke="#000" stroke-width="0.4">
+          <line x1="55" y1="32" x2="155" y2="32"/>
+          <line x1="55" y1="29" x2="55" y2="35"/>
+          <line x1="155" y1="29" x2="155" y2="35"/>
+          <line x1="80" y1="30.5" x2="80" y2="33.5"/>
+          <line x1="105" y1="30" x2="105" y2="34"/>
+          <line x1="130" y1="30.5" x2="130" y2="33.5"/>
+        </g>
+        <text x="105" y="39.5" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#000">この線が 100.0mm なら印刷倍率OK（25mm刻み）</text>
+
+        <!-- 模擬き裂の切断線 -->
+        <text x="105" y="50" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#000">✂ ここで切る（模擬き裂）</text>
+        <line x1="105" y1="53" x2="105" y2="232" stroke="#000" stroke-width="0.3" stroke-dasharray="3 2"/>
+
+        <!-- 固定側 -->
+        <text x="20" y="62" font-family="sans-serif" font-size="3.8" font-weight="bold" fill="#000">固定側 A</text>
+        <text x="20" y="67" font-family="sans-serif" font-size="2.7" fill="#444">貼って動かさない（剛体基準）</text>
+        <circle cx="45" cy="90"  r="7.5" fill="#000"/>
+        <circle cx="45" cy="150" r="7.5" fill="#000"/>
+        <circle cx="45" cy="210" r="7.5" fill="#000"/>
+        <text x="58" y="91"  font-family="sans-serif" font-size="3.6" fill="#000">A1</text>
+        <text x="58" y="151" font-family="sans-serif" font-size="3.6" fill="#000">A2</text>
+        <text x="58" y="211" font-family="sans-serif" font-size="3.6" fill="#000">A3</text>
+
+        <!-- 可動側 -->
+        <text x="190" y="62" font-family="sans-serif" font-size="3.8" font-weight="bold"
+              text-anchor="end" fill="#000">可動側 B</text>
+        <text x="190" y="67" font-family="sans-serif" font-size="2.7"
+              text-anchor="end" fill="#444">既知量だけ動かす</text>
+        <circle cx="165" cy="90"  r="7.5" fill="#000"/>
+        <circle cx="165" cy="150" r="7.5" fill="#000"/>
+        <circle cx="165" cy="210" r="7.5" fill="#000"/>
+        <text x="152" y="91"  font-family="sans-serif" font-size="3.6" text-anchor="end" fill="#000">B1</text>
+        <text x="152" y="151" font-family="sans-serif" font-size="3.6" text-anchor="end" fill="#000">B2</text>
+        <text x="152" y="211" font-family="sans-serif" font-size="3.6" text-anchor="end" fill="#000">B3</text>
+
+        <!-- 寸法線 -->
+        <g stroke="#999" stroke-width="0.25" stroke-dasharray="1.5 1.5">
+          <line x1="45" y1="78" x2="165" y2="78"/>
+          <line x1="30" y1="90" x2="30" y2="210"/>
+        </g>
+        <text x="105" y="76" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#666">A1–B1 = 120.0mm（設計値）</text>
+        <text x="27" y="150" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#666" transform="rotate(-90 27 150)">A1–A3 = 120.0mm（設計値）</text>
+
+        <text x="105" y="248" font-family="sans-serif" font-size="3.2"
+              text-anchor="middle" fill="#000">実測値を使うこと ─ A1–A3 をノギスで測り、ツールの「基準距離」に入力する</text>
+        <text x="105" y="254" font-family="sans-serif" font-size="2.7"
+              text-anchor="middle" fill="#666">印刷倍率で設計値からずれるため。実測値を使えば倍率誤差は完全に吸収されます。</text>
+
+        <!-- 四隅の見当 -->
+        <g stroke="#000" stroke-width="0.3" fill="none">
+          <path d="M8 8 h6 M8 8 v6"/><path d="M202 8 h-6 M202 8 v6"/>
+          <path d="M8 289 h6 M8 289 v-6"/><path d="M202 289 h-6 M202 289 v-6"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 画面では用紙全体が収まるように縮小表示する。印刷時は原寸に戻す。
+  function fitSheet() {
+    const frame = document.querySelector('.sheet-frame');
+    const scaler = document.querySelector('.scaler');
+    const sheet = document.querySelector('.sheet');
+    scaler.style.transform = 'none';
+    const available = frame.clientWidth - 28;
+    const natural = sheet.getBoundingClientRect().width;
+    if (!natural) return;
+    const factor = Math.min(1, available / natural);
+    scaler.style.transform = `scale(${factor})`;
+    scaler.style.height = `${sheet.getBoundingClientRect().height * factor}px`;
+  }
+  window.addEventListener('resize', fitSheet);
+  window.addEventListener('load', fitSheet);
+  fitSheet();
+</script>
+</body>
+</html>
