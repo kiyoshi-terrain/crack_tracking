@@ -2,8 +2,12 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>σ実測ツール — き裂追跡測定の検出限界を測る</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon.svg">
+<meta name="theme-color" content="#10131a">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
   :root {
     --bg: #10131a; --panel: #181d27; --line: #2a3140;
@@ -71,12 +75,18 @@
 <main>
   <section>
     <h2>1. 写真</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <button id="cameraBtn">📷 その場で撮影</button>
+      <button id="clearBtn" style="background:#2a3140">クリア</button>
+    </div>
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
     <div id="drop">
-      同じ位置から連続撮影した写真を 2 枚以上ドロップ（またはクリックして選択）<br>
+      写真をドロップ（またはクリックして選択）。追加していけます。<br>
       <span style="font-size:12px">EXIF を残すため、SNS 経由ではなくオリジナルファイルを使ってください</span>
     </div>
     <input type="file" id="fileInput" multiple accept="image/*" class="hidden">
     <div id="fileWarnings"></div>
+    <div id="quickCheck"></div>
     <div id="fileTable"></div>
   </section>
 

@@ -82,6 +82,56 @@ export function speckleQuality(image, { subsetHalf = 15, sampleStep = 8 } = {}) 
   return { mig, contrast, saturatedRatio, verdict, reason };
 }
 
+/**
+ * ピントの鋭さ（0〜1程度、大きいほど鋭い）。
+ *
+ * MIG だけでは「模様が無い」と「ピンボケ」を区別できません。どちらも
+ * 勾配が小さくなるからです。そこで **わざと 3x3 で平滑化してから
+ * MIG がどれだけ落ちるか** を見ます。
+ *
+ * - 鋭い画像: 細かい成分が多いので平滑化で大きく落ちる → 値が大きい
+ * - 既にボケた画像: 落とす細かい成分が無いので変化しない → 値が小さい
+ *
+ * 露出や被写体の模様の濃さに依らない比の量なので、現場でのしきい値が安定します。
+ */
+export function focusScore(image) {
+  const sharp = meanGradient(image);
+  if (sharp < 1e-12) return 0;
+  const blurred = meanGradient(blur3x3(image));
+  return Math.max(0, 1 - blurred / sharp);
+}
+
+function meanGradient(image) {
+  const { width: w, height: h, data } = image;
+  if (w < 3 || h < 3) return 0;
+  let sum = 0;
+  let count = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx = (data[y * w + x + 1] - data[y * w + x - 1]) * 0.5;
+      const gy = (data[(y + 1) * w + x] - data[(y - 1) * w + x]) * 0.5;
+      sum += Math.hypot(gx, gy);
+      count++;
+    }
+  }
+  return count ? sum / count : 0;
+}
+
+function blur3x3(image) {
+  const { width: w, height: h, data } = image;
+  const out = new Float32Array(w * h);
+  const at = (x, y) => data[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      out[y * w + x] =
+        (at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1) +
+         2 * at(x - 1, y) + 4 * at(x, y) + 2 * at(x + 1, y) +
+         at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1)) / 16;
+    }
+  }
+  return { width: w, height: h, data: out };
+}
+
 /** DIC の期待精度の目安（px）。MIG に反比例する経験式。 */
 export function expectedAccuracyPx({ mig, subsetHalf = 15, noiseLevel = 0.005 }) {
   const size = subsetHalf * 2 + 1;

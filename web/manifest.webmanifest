@@ -1,0 +1,19 @@
+{
+  "name": "σ実測ツール",
+  "short_name": "σ実測",
+  "description": "き裂追跡測定の検出限界を現地で実測する",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#10131a",
+  "theme_color": "#10131a",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

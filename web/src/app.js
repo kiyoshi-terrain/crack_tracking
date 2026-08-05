@@ -10,7 +10,7 @@ import { decodeFile, toGray, downsample, makePreviewCanvas, clampRegion } from '
 import { estimateGlobalShift, measureDisplacementField } from './dic.js';
 import { fitAffine, fitHomography, residuals } from './transform.js';
 import { summarize, detectionLimit, computeGSD, focalLengthPxFrom35mm } from './sigma.js';
-import { speckleQuality } from './speckle.js';
+import { speckleQuality, focusScore } from './speckle.js';
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -34,22 +34,41 @@ $('drop').addEventListener('drop', (e) => {
 });
 $('fileInput').addEventListener('change', (e) => loadFiles([...e.target.files]));
 
-async function loadFiles(fileList) {
-  const images = fileList.filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name));
-  if (images.length < 2) {
-    showFileWarnings(['2枚以上を選んでください。1枚では σ を測れません。']);
-    return;
+// その場で撮影。capture 属性で端末のカメラアプリが開き、
+// 最大解像度＋EXIF 付きの写真が返ります。
+// getUserMedia のプレビュー映像だと解像度が落ちるので、計測用にはこちらを使います。
+$('cameraBtn').addEventListener('click', () => $('cameraInput').click());
+$('cameraInput').addEventListener('change', (e) => {
+  loadFiles([...e.target.files]);
+  e.target.value = ''; // 同じ端末で連続撮影できるようにリセット
+});
+
+$('clearBtn').addEventListener('click', () => {
+  state.files = [];
+  state.roi = null;
+  $('fileTable').innerHTML = '';
+  $('quickCheck').innerHTML = '';
+  $('fileWarnings').innerHTML = '';
+  for (const id of ['scaleSection', 'roiSection', 'runSection', 'results']) {
+    $(id).classList.add('hidden');
   }
+});
+
+async function loadFiles(fileList) {
+  const images = fileList.filter(
+    (f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name)
+  );
+  if (!images.length) return;
   images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
   log(`${images.length} 枚を読み込み中…`);
-  state.files = [];
   const errors = [];
   for (const file of images) {
     try {
       const buffer = await file.arrayBuffer();
       const exif = parseExif(buffer);
       const imageData = await decodeFile(file);
+      // 追加していく方式。カメラは1回1枚しか返さないため。
       state.files.push({ file, exif, imageData });
     } catch (error) {
       errors.push(error.message);
@@ -57,19 +76,72 @@ async function loadFiles(fileList) {
   }
   log('');
 
-  if (state.files.length < 2) {
-    showFileWarnings(errors.length ? errors : ['読み込めた画像が 2 枚未満です。']);
+  if (!state.files.length) {
+    showFileWarnings(errors.length ? errors : ['画像を読み込めませんでした。']);
     return;
   }
 
   const warnings = [...errors, ...checkConsistency(state.files.map((f) => f.exif))];
+  if (state.files.length < 2) {
+    warnings.push('σ の実測には 2 枚以上必要です。同じ位置からもう数枚撮ってください（5〜20枚推奨）。');
+  }
   showFileWarnings(warnings);
   renderFileTable();
   setupScale();
   setupPreview();
+  await runQuickCheck();
+
   $('scaleSection').classList.remove('hidden');
   $('roiSection').classList.remove('hidden');
   $('runSection').classList.remove('hidden');
+  $('run').disabled = state.files.length < 2;
+}
+
+/**
+ * 現地チェック。1枚あれば走ります。
+ *
+ * σ は複数枚ないと出ませんが、「この位置で撮って意味があるか」は
+ * 1枚で判定できます。撮り直しが効くうちに気づくのが目的です。
+ */
+async function runQuickCheck() {
+  const channel = $('channel')?.value ?? 'luma';
+  const rows = [];
+  const focuses = [];
+
+  for (const f of state.files) {
+    const gray = toGray(f.imageData, state.roi, channel, true);
+    const quality = speckleQuality(gray, { subsetHalf: 15 });
+    const focus = focusScore(gray);
+    focuses.push(focus);
+    rows.push({ name: f.file.name, quality, focus });
+  }
+
+  // ピントの絶対値はレンズと被写体で変わるので、
+  // セッション内の中央値と比べて外れている枚を指摘する
+  const sorted = [...focuses].sort((a, b) => a - b);
+  const medianFocus = sorted[sorted.length >> 1];
+
+  const latest = rows[rows.length - 1];
+  const gsd = currentGSD();
+  const cls =
+    latest.quality.verdict === 'good' ? 'good' : latest.quality.verdict === 'fair' ? 'warn' : 'bad';
+
+  const blurred = rows
+    .map((r, i) => ({ ...r, i }))
+    .filter((r) => medianFocus > 0 && r.focus < medianFocus * 0.6);
+
+  $('quickCheck').innerHTML = `
+    <div class="banner ${cls}">
+      <strong>現地チェック（最新の1枚）</strong><br>
+      模様: ${latest.quality.verdict} — ${escapeHtml(latest.quality.reason)}<br>
+      ピント: ${latest.focus.toFixed(4)}（セッション中央値 ${medianFocus.toFixed(4)}）<br>
+      ${gsd ? `分解能: ${gsd.toFixed(4)} mm/px　→ 幅 ${(gsd * 3).toFixed(2)} mm 以上の特徴が識別可能` : '分解能: 撮影距離を入力すると表示します'}
+    </div>
+    ${blurred.length
+      ? `<div class="banner warn">${blurred.length} 枚がセッション中で明らかにボケています
+         （${blurred.map((b) => escapeHtml(b.name)).join(', ')}）。除外して撮り直してください。</div>`
+      : ''}
+  `;
 }
 
 function showFileWarnings(messages) {
@@ -381,4 +453,12 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
   );
+}
+
+// 現場は圏外が普通なので、一度開けば通信なしで使えるようにする。
+// file:// で開いた場合は登録できないが、その場合は元々ローカルにある。
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
 }

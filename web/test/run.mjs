@@ -6,7 +6,7 @@ import { integerSearch, refineSubpixel, measureDisplacementField, estimateGlobal
 import { downsample } from '../src/image.js';
 import { fitAffine, applyAffine, residuals } from '../src/transform.js';
 import { summarize, detectionLimit } from '../src/sigma.js';
-import { speckleQuality } from '../src/speckle.js';
+import { speckleQuality, focusScore } from '../src/speckle.js';
 import { makeBlobs, renderBlobs } from './synthetic.mjs';
 
 let passed = 0;
@@ -193,6 +193,29 @@ console.log('\n== テクスチャ品質（DIC適性） ==');
   const q2 = speckleQuality(flat, { subsetHalf: 15 });
   check('模様のある面は良判定', q1.verdict !== 'poor', `MIG=${q1.mig.toFixed(5)} 判定=${q1.verdict}`);
   check('平坦な面は不可判定', q2.verdict === 'poor', `MIG=${q2.mig.toFixed(5)} 判定=${q2.verdict}`);
+}
+
+console.log('\n== ピント判定（模様の有無と切り分けられるか） ==');
+{
+  const sharp = renderBlobs(blobs, W, H);
+  // 模様は同じでピントだけ甘い画像（斑点を太らせて再描画）
+  const softBlobs = blobs.map((b) => ({ ...b, sigma: b.sigma * 3 }));
+  const soft = renderBlobs(softBlobs, W, H);
+  // 模様が無い平坦面
+  const flat = { width: W, height: H, data: new Float32Array(W * H).fill(0.5) };
+
+  const fSharp = focusScore(sharp);
+  const fSoft = focusScore(soft);
+  check('鋭い画像 > ボケた画像', fSharp > fSoft * 1.5, `鋭 ${fSharp.toFixed(4)} / ボケ ${fSoft.toFixed(4)}`);
+  check('平坦面では 0', focusScore(flat) === 0, `${focusScore(flat).toFixed(4)}`);
+
+  // ボケた画像でも「模様はある」と判定される（MIG は残る）＝両者は別の指標
+  const qSoft = speckleQuality(soft, { subsetHalf: 15 });
+  check(
+    'ボケていても模様の有無は別に判定される',
+    qSoft.verdict !== 'poor',
+    `MIG=${qSoft.mig.toFixed(5)} 判定=${qSoft.verdict}`
+  );
 }
 
 console.log(`\n${passed} 件成功 / ${failed} 件失敗`);
