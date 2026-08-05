@@ -1,9 +1,40 @@
-# CrackScan（亀裂スキャン）
+# crack_tracking
+
+構造物のひび割れ・き裂を写真から計測するためのツール群です。用途の異なる2つが入っています。
+
+## 🔗 σ実測ツール（ブラウザで今すぐ動きます）
+
+### **→ https://kiyoshi-terrain.github.io/crack_tracking/**
+
+**き裂の追跡測定で、その機材・その現場で何mmの変化まで検出できるか**を実測します。
+
+同じ場所から連続撮影した写真を2枚以上ドロップするだけ。構造物は数分では動かないので、
+そこで出た「変位」がそのまま測定ノイズ σ です。3σ が実質的な検出限界になります。
+
+- インストール不要。**画像はブラウザ内で処理され、外部に送信されません**
+- iPhone / Android / ミラーレスを問いません（端末固有 API に依存しない設計）
+- 高所・非接触の追跡測定を想定。LiDAR も三脚も必須ではありません
+
+→ 詳細と撮影プロトコル: **[web/README.md](web/README.md)**
+
+ローカルで動かす場合:
+
+```bash
+cd web && python3 -m http.server 8080   # → http://localhost:8080
+node test/run.mjs                        # アルゴリズムの検証（18件）
+```
+
+---
+
+## 📱 CrackScan（iOS アプリ）
 
 iPhone の LiDAR とカメラで、構造物壁面のひび割れ幅を**実寸（mm）で計測**する iOS アプリです。
 
 撮影した瞬間に「1px が何 mm か」が確定するので、その場で幅が出ます。
-現場から戻ってから「この写真、何ミリのつもりで撮ったんだっけ」にならないようにするのが狙いです。
+
+> **適用範囲に注意**: LiDAR の実用距離は約3mです。**高所・遠方の計測には使えません。**
+> そちらは上の σ実測ツール（画像相関＋ターゲット方式）の系統になります。
+> 手の届く低所、または高所作業車で近接できる場面向けです。
 
 ---
 
@@ -106,6 +137,15 @@ swift test
 ## リポジトリ構成
 
 ```
+web/                   σ実測ツール（ブラウザ完結・端末非依存）
+  index.html           → https://kiyoshi-terrain.github.io/crack_tracking/
+  src/dic.js           デジタル画像相関（ZNCC + 逆合成Gauss-Newton）
+  src/transform.js     アフィン／ホモグラフィのフィット
+  src/sigma.js         σ算出と検出限界
+  src/speckle.js       DIC適性の定量判定（MIG）
+  src/exif.js          焦点距離の抽出と複数枚の整合性検証
+  test/run.mjs         合成テクスチャによる検証
+
 Sources/CrackCore/     計測アルゴリズム（ARKit 非依存・テスト可能）
   Geometry/            カメラ幾何・平面フィット・px→mm 換算
   Imaging/             画像バッファとフィルタ

@@ -1,0 +1,45 @@
+name: Pages
+
+# web/ 以下（σ実測ツール）を GitHub Pages で公開する。
+# サーバー処理は無く、画像はブラウザ内で完結するため静的配信で足ります。
+
+on:
+  push:
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 既定ブランチのときだけ公開する（作業ブランチを誤って出さないため）
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pages を設定（未設定なら有効化する）
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: web/ をアップロード
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: 公開
+        id: deploy
+        uses: actions/deploy-pages@v4
