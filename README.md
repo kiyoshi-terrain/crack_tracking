@@ -6,6 +6,11 @@
 
 ### **→ https://kiyoshi-terrain.github.io/crack_tracking/**
 
+> **初回のみリポジトリ設定が必要です。**
+> Settings → Pages → Build and deployment → Source を **「GitHub Actions」** に変更してください。
+> （GITHUB_TOKEN には Pages サイトを新規作成する権限が無いため、自動化できません）
+> 設定後、Actions の「Pages」ワークフローを再実行すれば公開されます。
+
 **き裂の追跡測定で、その機材・その現場で何mmの変化まで検出できるか**を実測します。
 
 同じ場所から連続撮影した写真を2枚以上ドロップするだけ。構造物は数分では動かないので、

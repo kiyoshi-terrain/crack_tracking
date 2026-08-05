@@ -30,10 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pages を設定（未設定なら有効化する）
+      # 初回のみ、リポジトリ側で Pages を有効にしておく必要があります。
+      #   Settings → Pages → Build and deployment → Source を "GitHub Actions" に
+      # GITHUB_TOKEN には Pages サイトを新規作成する権限が無いため、
+      # ここを自動化することはできません（enablement: true でも
+      # "Resource not accessible by integration" で失敗します）。
+      - name: Pages を設定
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: web/ をアップロード
         uses: actions/upload-pages-artifact@v3

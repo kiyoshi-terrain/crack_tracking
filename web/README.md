@@ -14,6 +14,8 @@
 
 ### → **https://kiyoshi-terrain.github.io/crack_tracking/**
 
+> 初回のみ Settings → Pages → Source を「GitHub Actions」に設定してください。
+
 ブラウザだけで動きます。サーバー処理も通信も無く、**画像がブラウザの外に出ることはありません**。
 スマホからでもそのまま開けます。
 
