@@ -6,195 +6,360 @@
 <title>σ実測ツール — き裂追跡測定の検出限界を測る</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon.svg">
-<meta name="theme-color" content="#10131a">
+<meta name="theme-color" content="#0f1512">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <style>
+  /* ダークアウトドアテーマ（フォレストグリーン + アンバー）
+     field-note-app のロードマップで定めた現場ツール共通の方針に揃えています。 */
   :root {
-    --bg: #10131a; --panel: #181d27; --line: #2a3140;
-    --text: #e6eaf2; --muted: #9aa5b8;
-    --good: #3fbf72; --warn: #e8b23a; --bad: #e05a5a; --accent: #4a9eff;
+    --ground:   #0f1512;
+    --panel:    #161d19;
+    --panel-2:  #1c2620;
+    --line:     #253028;
+    --ink:      #e6ece8;
+    --ink-soft: #94a69c;
+    --ink-dim:  #67766d;
+
+    --amber:    #d99a2b;   /* 操作・主要な数値 */
+    --amber-dim:#8a6420;
+    --forest:   #4a9d72;   /* 良好 */
+    --critical: #c9564e;   /* 不可 */
+
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
   }
+
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
-    line-height: 1.6; font-size: 14px;
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    line-height: 1.65; font-size: 15px;
+    padding-bottom: env(safe-area-inset-bottom);
   }
-  header { padding: 20px 24px 12px; border-bottom: 1px solid var(--line); }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  header p { margin: 0; color: var(--muted); font-size: 13px; }
-  main { max-width: 1100px; margin: 0 auto; padding: 20px 24px 80px; }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
-  h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
-  #drop {
-    border: 2px dashed var(--line); border-radius: 10px; padding: 32px; text-align: center;
-    color: var(--muted); cursor: pointer; transition: .15s;
+  .mono, .num {
+    font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
   }
-  #drop:hover, #drop.over { border-color: var(--accent); color: var(--text); background: #1d2431; }
-  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-  th { color: var(--muted); font-weight: 600; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .warn { color: var(--warn); }
-  .bad { color: var(--bad); }
-  .good { color: var(--good); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+
+  /* ── 骨格 ─────────────────────────────── */
+  header {
+    padding: 18px 20px 14px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #131a16, var(--ground));
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .01em; }
+  header p { margin: 4px 0 0; color: var(--ink-soft); font-size: 13px; max-width: 62ch; }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 64px; }
+
+  /* ── ステップ ─────────────────────────── */
+  .step {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
+    transition: opacity .2s, border-color .2s;
+  }
+  .step[data-state="locked"] { opacity: .42; pointer-events: none; }
+  .step[data-state="done"] { border-color: #2e4a3b; }
+  .step > header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; background: none; border: 0; border-bottom: 1px solid var(--line);
+  }
+  .step > header h2 { font-size: 14px; margin: 0; font-weight: 600; flex: 1; }
+  .step .body { padding: 16px; }
+
+  .badge {
+    width: 22px; height: 22px; border-radius: 50%; flex: none;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 700;
+    font-family: SFMono-Regular, Menlo, monospace;
+    background: var(--panel-2); color: var(--ink-dim);
+    border: 1px solid var(--line);
+  }
+  .step[data-state="active"] .badge { background: var(--amber); color: #1a1206; border-color: var(--amber); }
+  .step[data-state="done"] .badge { background: var(--forest); color: #08130d; border-color: var(--forest); }
+  .step[data-state="done"] .badge::after { content: "✓"; }
+  .step[data-state="done"] .badge span { display: none; }
+  .step-note { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
+
+  /* ── 入力 ─────────────────────────────── */
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; }
   input, select {
-    width: 100%; background: #0d1017; color: var(--text); border: 1px solid var(--line);
-    border-radius: 6px; padding: 7px 9px; font-size: 13px; font-family: inherit;
+    width: 100%; background: #0c110e; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 10px 11px; font: inherit; font-size: 15px;
   }
+  input:focus-visible, select:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; border-color: var(--amber); }
+  input[readonly] { color: var(--ink-soft); background: #0a0e0c; }
+
   button {
-    background: var(--accent); color: #fff; border: 0; border-radius: 7px;
-    padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+    appearance: none; border: 1px solid transparent; border-radius: 8px;
+    font: inherit; font-weight: 600; padding: 11px 18px; cursor: pointer;
+    background: var(--panel-2); color: var(--ink); border-color: var(--line);
   }
-  button:disabled { background: #2a3140; color: var(--muted); cursor: not-allowed; }
-  #preview { position: relative; display: inline-block; max-width: 100%; }
-  #preview canvas { display: block; max-width: 100%; border-radius: 6px; cursor: crosshair; }
+  button:hover:not(:disabled) { background: #223029; }
+  button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--amber); color: #1a1206; border-color: var(--amber); }
+  button.primary:hover:not(:disabled) { background: #e8aa3c; }
+  button.wide { width: 100%; padding: 14px; font-size: 16px; }
+
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* ── 写真サムネイル ────────────────────── */
+  #drop {
+    border: 1.5px dashed var(--line); border-radius: 9px; padding: 22px 16px;
+    text-align: center; color: var(--ink-soft); cursor: pointer; font-size: 13.5px;
+    transition: .15s; margin-top: 12px;
+  }
+  #drop:hover, #drop.over { border-color: var(--amber); color: var(--ink); background: #17201a; }
+
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-top: 14px; }
+  .thumb { position: relative; border-radius: 8px; overflow: hidden; background: #0a0e0c; border: 1px solid var(--line); }
+  .thumb.reference { border-color: var(--amber); }
+  .thumb img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover; }
+  .thumb .tag {
+    position: absolute; top: 5px; left: 5px; font-size: 10px; font-weight: 700;
+    padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,.72); color: var(--ink);
+    font-family: SFMono-Regular, Menlo, monospace;
+  }
+  .thumb.reference .tag { background: var(--amber); color: #1a1206; }
+  .thumb .drop-btn {
+    position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0;
+    border-radius: 6px; background: rgba(0,0,0,.72); color: var(--ink);
+    font-size: 15px; line-height: 1; border: 0; display: grid; place-items: center;
+  }
+  .thumb .drop-btn:hover { background: var(--critical); color: #fff; }
+  .thumb .foot {
+    display: flex; align-items: center; gap: 5px; padding: 5px 7px;
+    font-size: 10.5px; font-family: SFMono-Regular, Menlo, monospace; color: var(--ink-soft);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.good { background: var(--forest); }
+  .dot.warn { background: var(--amber); }
+  .dot.bad  { background: var(--critical); }
+
+  /* ── 通知 ─────────────────────────────── */
+  .note { color: var(--ink-soft); font-size: 12.5px; margin: 10px 0 0; }
+  .banner {
+    padding: 10px 13px; border-radius: 8px; font-size: 13.5px; margin-bottom: 10px;
+    border: 1px solid; display: flex; gap: 9px; align-items: flex-start;
+  }
+  .banner::before { font-weight: 700; flex: none; }
+  .banner.good { background: rgba(74,157,114,.11); border-color: rgba(74,157,114,.4); }
+  .banner.good::before { content: "✓"; color: var(--forest); }
+  .banner.warn { background: rgba(217,154,43,.11); border-color: rgba(217,154,43,.4); }
+  .banner.warn::before { content: "!"; color: var(--amber); }
+  .banner.bad  { background: rgba(201,86,78,.11); border-color: rgba(201,86,78,.4); }
+  .banner.bad::before { content: "×"; color: var(--critical); }
+
+  /* ── 解析範囲 ─────────────────────────── */
+  #preview { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+  #preview canvas { display: block; max-width: 100%; border-radius: 8px; cursor: crosshair; touch-action: none; }
   #roiBox {
-    position: absolute; border: 2px solid var(--accent); background: rgba(74,158,255,.12);
-    pointer-events: none; display: none;
+    position: absolute; border: 2px solid var(--amber);
+    background: rgba(217,154,43,.1); pointer-events: none; display: none;
   }
-  .headline { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
-  .headline small { font-size: 14px; font-weight: 400; color: var(--muted); }
-  .note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
-  .hidden { display: none; }
-  #log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: pre-wrap; }
-  .banner { padding: 9px 12px; border-radius: 7px; margin-bottom: 8px; font-size: 13px; }
-  .banner.warn { background: rgba(232,178,58,.13); border: 1px solid rgba(232,178,58,.35); }
-  .banner.bad { background: rgba(224,90,90,.13); border: 1px solid rgba(224,90,90,.35); }
-  .banner.good { background: rgba(63,191,114,.13); border: 1px solid rgba(63,191,114,.35); }
+
+  /* ── 詳細設定 ─────────────────────────── */
+  details.advanced { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  details.advanced summary {
+    cursor: pointer; font-size: 13px; color: var(--ink-soft); list-style: none;
+    display: flex; align-items: center; gap: 6px;
+  }
+  details.advanced summary::-webkit-details-marker { display: none; }
+  details.advanced summary::before { content: "▸"; transition: transform .15s; }
+  details.advanced[open] summary::before { transform: rotate(90deg); }
+  details.advanced .row { margin-top: 12px; }
+
+  /* ── 進捗 ─────────────────────────────── */
+  .progress { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 12px; display: none; }
+  .progress.on { display: block; }
+  .progress i { display: block; height: 100%; background: var(--amber); width: 0; transition: width .2s; }
+  #log { font-size: 12.5px; color: var(--ink-soft); margin-top: 8px; min-height: 1.2em; }
+
+  /* ── 結果 ─────────────────────────────── */
+  .verdict {
+    background: linear-gradient(180deg, #1a241d, var(--panel-2));
+    border: 1px solid #2e4a3b; border-radius: var(--radius);
+    padding: 20px; margin-bottom: 16px;
+  }
+  .verdict .eyebrow {
+    font-size: 11px; letter-spacing: .1em; color: var(--ink-soft);
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .verdict .answer { font-size: 17px; line-height: 1.5; text-wrap: balance; }
+  .verdict .answer b {
+    font-family: SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
+    font-size: 30px; color: var(--amber); font-weight: 700; letter-spacing: -.02em;
+  }
+  .verdict .sub { color: var(--ink-soft); font-size: 13px; margin-top: 10px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px;
+           background: var(--line); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 16px; }
+  .stat { background: var(--panel); padding: 12px 14px; }
+  .stat .k { font-size: 11px; color: var(--ink-soft); }
+  .stat .v { font-size: 20px; font-weight: 600; margin-top: 2px;
+             font-family: SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+  h3.sec { font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+           color: var(--ink-soft); margin: 22px 0 10px; font-weight: 600; }
+
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--ink-soft); font-weight: 600; font-size: 11.5px; }
+  td.num, th.num { text-align: right; }
+
+  canvas#fieldCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); }
+  .hidden { display: none !important; }
+  a { color: var(--amber); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
 <header>
   <h1>σ実測ツール</h1>
-  <p>同じ場所から連続撮影した写真から、測定ノイズ σ を実測して検出限界を出します。構造物は数分では動かないので、出た値がそのままノイズです。</p>
+  <p>同じ場所から連続撮影した写真から、測定ノイズ σ を実測します。構造物は数分では動かないので、そこで出た「変位」がそのままノイズです。</p>
 </header>
 
 <main>
-  <section>
-    <h2>1. 写真</h2>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-      <button id="cameraBtn">📷 その場で撮影</button>
-      <button id="clearBtn" style="background:#2a3140">クリア</button>
+  <!-- 1 ───────────────────────────────── -->
+  <section class="step" id="step1" data-state="active">
+    <header><span class="badge"><span>1</span></span><h2>写真</h2><span class="step-note" id="note1">2枚以上</span></header>
+    <div class="body">
+      <div class="btn-row">
+        <button class="primary" id="cameraBtn">その場で撮影</button>
+        <button id="clearBtn">すべて削除</button>
+      </div>
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
+      <div id="drop">
+        写真をドロップ、またはタップして選択（追加していけます）<br>
+        <span style="font-size:12px;color:var(--ink-dim)">EXIF を残すため SNS 経由ではなくオリジナルを</span>
+      </div>
+      <input type="file" id="fileInput" multiple accept="image/*" class="hidden">
+
+      <p class="note">検証用の <a href="./targets/">模擬き裂ターゲットシート</a>（A4原寸印刷）も使えます。</p>
+
+      <div id="thumbs" class="thumbs"></div>
+      <div id="fileWarnings" style="margin-top:12px"></div>
+      <div id="quickCheck"></div>
     </div>
-    <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
-    <div id="drop">
-      写真をドロップ（またはクリックして選択）。追加していけます。<br>
-      <span style="font-size:12px">EXIF を残すため、SNS 経由ではなくオリジナルファイルを使ってください</span>
-    </div>
-    <input type="file" id="fileInput" multiple accept="image/*" class="hidden">
-    <p class="note" style="margin-top:10px">
-      実物のターゲットを設置する前に検証したい場合は
-      <a href="./targets/" style="color:var(--accent)">模擬き裂ターゲットシート</a>
-      を A4 原寸で印刷してください。既知量を動かして計測系の正しさを確認できます。
-    </p>
-    <div id="fileWarnings"></div>
-    <div id="quickCheck"></div>
-    <div id="fileTable"></div>
   </section>
 
-  <section id="scaleSection" class="hidden">
-    <h2>2. スケール</h2>
-    <div class="grid">
-      <div>
-        <label>撮影距離（m）— レーザー距離計の実測値</label>
-        <input type="number" id="distance" step="0.01" min="0.05" placeholder="例: 6.0">
-      </div>
-      <div>
-        <label>35mm換算焦点距離（mm）</label>
-        <input type="number" id="focal35" step="0.1" placeholder="EXIF から自動">
-      </div>
-      <div>
-        <label>解析チャンネル</label>
-        <select id="channel">
-          <option value="luma">輝度（線形光・汎用）</option>
-          <option value="green">緑のみ（デモザイク影響が最小）</option>
-        </select>
-      </div>
-      <div>
-        <label>GSD（自動計算）</label>
-        <input type="text" id="gsd" readonly placeholder="距離と焦点距離を入力">
-      </div>
-    </div>
-    <p class="note">距離が未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
-
-    <div id="referenceScale" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-      <label style="margin-bottom:8px">既知の基準距離からスケールを決める（ターゲット方式・こちらが高精度）</label>
-      <div class="grid">
+  <!-- 2 ───────────────────────────────── -->
+  <section class="step" id="step2" data-state="locked">
+    <header><span class="badge"><span>2</span></span><h2>スケール</h2><span class="step-note" id="note2">mm換算に必要</span></header>
+    <div class="body">
+      <div class="row">
         <div>
-          <label>基準にするターゲット対</label>
-          <select id="referencePair"></select>
+          <label>撮影距離（m）</label>
+          <input type="number" id="distance" step="0.01" min="0.05" inputmode="decimal" placeholder="レーザー距離計の実測値">
         </div>
         <div>
-          <label>その実距離（mm）— ノギスの実測値</label>
-          <input type="number" id="referenceLength" step="0.01" min="1" placeholder="例: 119.62">
+          <label>35mm換算焦点距離（mm）</label>
+          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="EXIF から自動">
+        </div>
+        <div>
+          <label>分解能 GSD</label>
+          <input type="text" id="gsd" readonly placeholder="—">
         </div>
       </div>
-      <p class="note">レーザー距離計も焦点距離も不要になり、印刷倍率の誤差も吸収できます。
-      写真に基準が写っているので後から検証もできます。</p>
+
+      <div id="referenceScale" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+        <label style="margin-bottom:8px;color:var(--amber)">既知の基準距離から決める（こちらが高精度）</label>
+        <div class="row">
+          <div>
+            <label>基準にするターゲット対</label>
+            <select id="referencePair"></select>
+          </div>
+          <div>
+            <label>その実距離（mm）</label>
+            <input type="number" id="referenceLength" step="0.01" min="1" inputmode="decimal" placeholder="ノギスの実測値">
+          </div>
+        </div>
+        <p class="note">距離計も焦点距離も不要になり、印刷倍率の誤差も吸収できます。</p>
+      </div>
+
+      <p class="note">未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
     </div>
   </section>
 
-  <section id="roiSection" class="hidden">
-    <h2>3. 解析範囲（ドラッグで選択・未選択なら中央部）</h2>
-    <div id="preview"><div id="roiBox"></div></div>
-    <div class="grid" style="margin-top:12px">
-      <div>
-        <label>サブセット半径（px）</label>
-        <input type="number" id="subsetHalf" value="15" min="5" max="60">
+  <!-- 3 ───────────────────────────────── -->
+  <section class="step" id="step3" data-state="locked">
+    <header><span class="badge"><span>3</span></span><h2>解析範囲と方式</h2><span class="step-note" id="note3"></span></header>
+    <div class="body">
+      <div id="preview"><div id="roiBox"></div></div>
+      <p class="note">ドラッグで範囲を選択。未選択なら中央60%を使います。</p>
+
+      <div class="row" style="margin-top:14px">
+        <div>
+          <label>解析方式</label>
+          <select id="method">
+            <option value="dic">DIC（自然模様）</option>
+            <option value="targets">ターゲット（円形マーカー）</option>
+            <option value="both">両方 — 併走して比較</option>
+          </select>
+        </div>
+        <div>
+          <label>変換モデル</label>
+          <select id="model">
+            <option value="affine">アフィン（三脚・連写）</option>
+            <option value="homography">ホモグラフィ（手持ち・別日）</option>
+          </select>
+        </div>
       </div>
-      <div>
-        <label>測点間隔（px）</label>
-        <input type="number" id="step" value="25" min="8" max="200">
-      </div>
-      <div>
-        <label>変換モデル</label>
-        <select id="model">
-          <option value="affine">アフィン（三脚・連写）</option>
-          <option value="homography">ホモグラフィ（手持ち・別日）</option>
-        </select>
-      </div>
-      <div>
-        <label>解析方式</label>
-        <select id="method">
-          <option value="dic">DIC（自然模様）</option>
-          <option value="targets">ターゲット（円形マーカー）</option>
-          <option value="both">両方（併走して比較）</option>
-        </select>
-      </div>
+
+      <details class="advanced">
+        <summary>詳細設定</summary>
+        <div class="row">
+          <div>
+            <label>サブセット半径（px）</label>
+            <input type="number" id="subsetHalf" value="15" min="5" max="60" inputmode="numeric">
+          </div>
+          <div>
+            <label>測点間隔（px）</label>
+            <input type="number" id="step" value="25" min="8" max="200" inputmode="numeric">
+          </div>
+          <div>
+            <label>解析チャンネル</label>
+            <select id="channel">
+              <option value="luma">輝度（線形光・汎用）</option>
+              <option value="green">緑のみ（デモザイク影響が最小）</option>
+            </select>
+          </div>
+        </div>
+        <p class="note">サブセットは大きいほど精度が上がり分解能が下がります。31px角（半径15）が標準的な出発点です。</p>
+      </details>
     </div>
-    <p class="note">サブセットは大きいほど精度が上がり分解能が下がります。31px 角（半径15）が標準的な出発点です。</p>
   </section>
 
-  <section id="runSection" class="hidden">
-    <button id="run">σ を実測する</button>
-    <div id="log" style="margin-top:10px"></div>
+  <!-- 4 ───────────────────────────────── -->
+  <section class="step" id="step4" data-state="locked">
+    <header><span class="badge"><span>4</span></span><h2>実行</h2></header>
+    <div class="body">
+      <button class="primary wide" id="run" disabled>σ を実測する</button>
+      <div class="progress" id="progress"><i></i></div>
+      <div id="log"></div>
+    </div>
   </section>
 
-  <section id="results" class="hidden">
-    <h2>結果</h2>
-    <div id="quality"></div>
-    <div class="grid" style="margin:16px 0">
-      <div>
-        <label>1測点あたりのノイズ σ</label>
-        <div class="headline" id="sigmaPx">—</div>
-      </div>
-      <div>
-        <label>検出限界（3σ・2点間の相対変位）</label>
-        <div class="headline" id="limitPx">—</div>
-      </div>
-      <div>
-        <label>実寸換算の検出限界</label>
-        <div class="headline good" id="limitMM">—</div>
-      </div>
+  <!-- 結果 ─────────────────────────────── -->
+  <section class="step hidden" id="results" data-state="done">
+    <header><span class="badge"><span>✓</span></span><h2>結果</h2>
+      <button id="exportBtn" style="padding:6px 12px;font-size:12.5px">書き出す</button>
+    </header>
+    <div class="body">
+      <div class="verdict" id="verdict"></div>
+      <div class="stats" id="stats"></div>
+      <div id="quality"></div>
+      <div id="frameTable" class="scroll-x"></div>
+      <div id="targetResults"></div>
+
+      <h3 class="sec">残差ベクトル（カメラの動きを差し引いた残り）</h3>
+      <canvas id="fieldCanvas"></canvas>
+      <p class="note" id="fieldNote"></p>
     </div>
-    <div id="frameTable"></div>
-    <div id="targetResults"></div>
-    <h2 style="margin-top:20px">残差ベクトル（カメラの動きを差し引いた残り）</h2>
-    <canvas id="fieldCanvas" style="max-width:100%;background:#0d1017;border-radius:6px"></canvas>
-    <p class="note" id="fieldNote"></p>
   </section>
 </main>
 
