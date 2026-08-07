@@ -12,30 +12,6 @@ import RealityKit
 @available(iOS 17.0, *)
 actor PhotogrammetryRunner {
 
-    /// 生成する 3D モデルの詳細度。
-    ///
-    /// **iOS で使えるのは `.preview` と `.reduced` だけです。**
-    /// `.medium` / `.full` / `.raw` は macOS 専用で、iOS SDK には存在しません
-    /// （メモリと熱の制約によるもの）。より高精細なモデルが要る場合は、
-    /// 撮影データを Mac へ持ち出して処理する運用になります。
-    enum Detail: String, CaseIterable, Sendable {
-        case preview, reduced
-
-        var requestDetail: PhotogrammetrySession.Request.Detail {
-            switch self {
-            case .preview: return .preview
-            case .reduced: return .reduced
-            }
-        }
-
-        var displayName: String {
-            switch self {
-            case .preview: return "プレビュー（速い・粗い）"
-            case .reduced: return "標準（iOS で選べる最高）"
-            }
-        }
-    }
-
     enum RunnerError: LocalizedError {
         case unsupportedDevice
         case noImages
@@ -64,7 +40,6 @@ actor PhotogrammetryRunner {
     func generateModel(
         imagesDirectory: URL,
         outputURL: URL,
-        detail: Detail = .reduced,
         onProgress: @escaping (Double) -> Void
     ) async throws {
         guard PhotogrammetrySession.isSupported else { throw RunnerError.unsupportedDevice }
@@ -81,8 +56,11 @@ actor PhotogrammetryRunner {
         configuration.sampleOrdering = .sequential
 
         let session = try PhotogrammetrySession(input: imagesDirectory, configuration: configuration)
+        // 精細度は `.reduced` 固定。iOS の Object Capture では他の値
+        //（.medium/.full/.raw/.preview）はビルドが通らないことを実機ビルドで確認済み。
+        // 記録用モデルなので `.reduced` で足ります（計測値はモデルから取っていません）。
         try session.process(requests: [
-            .modelFile(url: outputURL, detail: detail.requestDetail),
+            .modelFile(url: outputURL, detail: .reduced),
         ])
 
         for try await output in session.outputs {
