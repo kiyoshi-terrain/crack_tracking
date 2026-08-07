@@ -26,6 +26,8 @@ const SHELL = [
   './src/pointcloud.js',
   './src/surface.js',
   './src/cloudpanel.js',
+  './src/history.js',
+  './src/historypanel.js',
 ];
 
 self.addEventListener('install', (event) => {

@@ -13,6 +13,7 @@ import { summarize, detectionLimit, computeGSD, focalLengthPxFrom35mm } from './
 import { speckleQuality, focusScore } from './speckle.js';
 import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
+import { initHistoryPanel, refreshHistoryPanel } from './historypanel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -261,6 +262,9 @@ initCloudPanel({
   onChange: updateGSD,
 });
 
+// 経時管理は解析結果を受け取るだけで、解析には関与しない
+initHistoryPanel({ getMeasurement: () => state.measurement ?? null });
+
 // ═══════════════════════════════════════════ 解析範囲
 
 function setupPreview() {
@@ -427,6 +431,18 @@ function renderVerdict(dicStats, targetSigma) {
 
   const best = candidates.reduce((a, b) => (a.sigma <= b.sigma ? a : b));
   const limit = detectionLimit({ sigmaPx: best.sigma, millimetersPerPixel: gsd ?? 1, frames });
+  state.measurement = gsd ? {
+    at: new Date().toISOString(),
+    gsd, frames,
+    method: best.name,
+    // 2時期を比べるときに必要なのは「1測点」ではなく「き裂を挟む2点」の σ
+    pairSigmaMM: limit.pairSigmaMM,
+    pairs: (state.targetPairs ?? []).map((p) => ({ ...p, meanMM: p.meanPx * gsd })),
+    bulgeMM: cloudState.bulges?.regions?.[0]?.peak != null
+      ? cloudState.bulges.regions[0].peak * cloudState.unit.scale
+      : null,
+  } : null;
+  refreshHistoryPanel();
   const unit = gsd ? 'mm' : 'px';
   const value = gsd ? limit.detectionLimitMM : 3 * Math.SQRT2 * best.sigma / Math.sqrt(frames);
 
@@ -562,6 +578,13 @@ async function analyzeTargets(reference, channel, roi) {
     const mean = values.reduce((s, v) => s + v, 0) / Math.max(1, values.length);
     return { pair, values, mean, sigma: robustSigmaOf(values), span: values.length ? Math.max(...values) - Math.min(...values) : 0 };
   });
+
+  // 経時管理では「どの対を測点の量とするか」を選ばせるので、対ごとの結果を残す
+  state.targetPairs = rows.map((r) => ({
+    label: `${r.pair.i + 1}–${r.pair.j + 1}`,
+    meanPx: r.mean,
+    sigmaPx: r.sigma,
+  }));
 
   const sigmas = rows.map((r) => r.sigma).filter((s) => isFinite(s) && s > 0).sort((a, b) => a - b);
   const medianSigma = sigmas.length ? sigmas[sigmas.length >> 1] : NaN;

@@ -11,6 +11,7 @@ import { makeBlobs, renderBlobs } from './synthetic.mjs';
 import { runTargetTests } from './targets.mjs';
 import { runPointCloudTests } from './pointcloud.mjs';
 import { runSurfaceTests } from './surface.mjs';
+import { runHistoryTests } from './history.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -225,6 +226,7 @@ console.log('\n== ピント判定（模様の有無と切り分けられるか�
 runTargetTests(check, near);
 runPointCloudTests(check, near);
 runSurfaceTests(check, near);
+runHistoryTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

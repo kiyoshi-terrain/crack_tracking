@@ -213,6 +213,7 @@
 
   canvas#fieldCanvas, canvas#bulgeCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); }
   canvas#bulgeCanvas { image-rendering: pixelated; display: block; }
+  canvas#trendCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); display: block; margin-top: 14px; }
   .hidden { display: none !important; }
   a { color: var(--amber); }
 
@@ -420,6 +421,109 @@
       <p class="note" id="fieldNote"></p>
     </div>
   </section>
+
+  <!-- 経時管理 ─────────────────────────── -->
+  <section class="step" id="stepHistory" data-state="active">
+    <header><span class="badge"><span>◆</span></span><h2>経時管理</h2><span class="step-note">前回と比べる</span></header>
+    <div class="body">
+      <p class="note" style="margin-top:0">
+        測点を登録して、解析のたびに1回ぶんの観測として積みます。
+        <b>2時期を比べるときは両日のばらつきが乗る</b>ので、
+        差の検出限界は1日ぶんの 3σ より √2 倍ほど広くなります。ここはツールが計算します。
+      </p>
+
+      <div id="historyMessage"></div>
+
+      <div class="row">
+        <div>
+          <label>測点</label>
+          <select id="stationSelect"></select>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="stationDelete" style="width:100%">この測点を削除</button>
+        </div>
+      </div>
+
+      <details class="advanced">
+        <summary>測点を追加する</summary>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>名前</label>
+            <input type="text" id="stationName" placeholder="例: A-1 橋台west面 上段き裂">
+          </div>
+          <div>
+            <label>部材</label>
+            <input type="text" id="stationMember" placeholder="例: 橋台">
+          </div>
+          <div>
+            <label>しきい値（mm・任意）</label>
+            <input type="number" id="stationThreshold" step="0.1" min="0" inputmode="decimal" placeholder="到達年数の目安に">
+          </div>
+        </div>
+        <button id="stationAdd" style="margin-top:12px">測点を追加</button>
+      </details>
+
+      <h3 class="sec">今回の観測を記録する</h3>
+      <div id="obsStatus"></div>
+      <div class="row">
+        <div>
+          <label>計測値の取り方</label>
+          <select id="obsValueSource"></select>
+        </div>
+        <div id="obsValueRow">
+          <label>計測値（mm）</label>
+          <input type="number" id="obsValue" step="0.0001" inputmode="decimal" placeholder="実測値">
+        </div>
+        <div>
+          <label>日時（空なら解析日時）</label>
+          <input type="datetime-local" id="obsAt">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>この回の σ（mm）</label>
+          <input type="number" id="obsSigma" step="0.0001" min="0" inputmode="decimal" placeholder="解析から自動">
+        </div>
+        <div>
+          <label>気温（℃）</label>
+          <input type="number" id="obsTemp" step="0.1" inputmode="decimal" placeholder="温度分離に使います">
+        </div>
+        <div>
+          <label>天候</label>
+          <input type="text" id="obsWeather" placeholder="曇 / 晴 / 日陰">
+        </div>
+        <div>
+          <label>備考</label>
+          <input type="text" id="obsNote" placeholder="">
+        </div>
+      </div>
+      <button class="primary" id="obsRecord" style="margin-top:12px">この測点の観測として記録</button>
+      <p class="note">
+        σ は解析結果から自動で入ります。ノギスなど別の手段で測った場合は手で入れてください。
+        <b>空のまま記録すると差だけ残り、有意判定はしません。</b>
+        気温を毎回入れておくと、<b>温度による見かけの開閉</b>を進行から分離できます。
+        季節を変えて 4回以上（気温の幅が 0.5K 以上）あれば自動で分離します。
+      </p>
+
+      <div id="historyBody"></div>
+      <canvas id="trendCanvas" class="hidden"></canvas>
+      <p class="note" id="trendLegend"></p>
+
+      <h3 class="sec">保存</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="historyExportJSON">JSON を書き出す</button>
+        <button id="historyExportCSV">CSV を書き出す</button>
+        <button id="historyImport">JSON を読み込む</button>
+        <input type="file" id="historyImportInput" accept=".json,application/json" class="hidden">
+      </div>
+      <p class="note">
+        履歴はこの端末のブラウザにだけ保存されます（サーバーには何も送りません）。
+        <b>端末を替えると消えるので、JSON の書き出しを「保存」として扱ってください。</b>
+      </p>
+    </div>
+  </section>
+
 </main>
 
 <script type="module" src="./src/app.js"></script>
