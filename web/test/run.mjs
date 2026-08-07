@@ -11,6 +11,7 @@ import { makeBlobs, renderBlobs } from './synthetic.mjs';
 import { runTargetTests } from './targets.mjs';
 import { runPointCloudTests } from './pointcloud.mjs';
 import { runSurfaceTests } from './surface.mjs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
 let failed = 0;
@@ -224,6 +225,18 @@ console.log('\n== ピント判定（模様の有無と切り分けられるか�
 runTargetTests(check, near);
 runPointCloudTests(check, near);
 runSurfaceTests(check, near);
+
+// ---------------------------------------------------------------- オフライン
+console.log('\n== サービスワーカー ==');
+{
+  // 1本でも漏れると圏外でその機能だけ静かに動かなくなる。
+  // 実際 targets.js が漏れていたので、機械で見張る。
+  const modules = readdirSync(new URL('../src/', import.meta.url)).filter((f) => f.endsWith('.js'));
+  const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  const missing = modules.filter((m) => !sw.includes(`'./src/${m}'`));
+  check('src/ の全モジュールがキャッシュ対象', missing.length === 0,
+    missing.length ? `漏れ: ${missing.join(', ')}` : `${modules.length} 本`);
+}
 
 console.log(`\n${passed} 件成功 / ${failed} 件失敗`);
 process.exit(failed === 0 ? 0 : 1);

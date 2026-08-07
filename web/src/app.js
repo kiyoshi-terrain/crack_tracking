@@ -12,6 +12,7 @@ import { fitAffine, fitHomography, residuals } from './transform.js';
 import { summarize, detectionLimit, computeGSD, focalLengthPxFrom35mm } from './sigma.js';
 import { speckleQuality, focusScore } from './speckle.js';
 import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
+import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -94,6 +95,7 @@ async function loadFiles(fileList) {
   showWarnings([...errors, ...checkConsistency(state.files.map((f) => f.exif))]);
   renderThumbs();
   setupScale();
+  refreshCloudScale();
   setupPreview();
   renderQuickCheck();
   updateSteps();
@@ -194,7 +196,7 @@ function setupScale() {
 }
 
 for (const id of ['distance', 'focal35', 'referenceLength']) {
-  $(id).addEventListener('input', updateGSD);
+  $(id).addEventListener('input', () => { refreshCloudScale(); updateGSD(); });
 }
 $('referencePair').addEventListener('change', updateGSD);
 
@@ -205,6 +207,10 @@ function currentGSD() {
   const referenceMM = parseFloat($('referenceLength').value);
   const referencePx = parseFloat($('referencePair').value);
   if (referenceMM > 0 && referencePx > 0) return referenceMM / referencePx;
+
+  // 次に点群。距離だけでなく斜角も入るので、距離計＋焦点距離より確か。
+  const fromCloud = cloudGSD();
+  if (fromCloud > 0) return fromCloud;
 
   const distance = parseFloat($('distance').value);
   const focal35 = parseFloat($('focal35').value);
@@ -219,9 +225,41 @@ function currentGSD() {
 function updateGSD() {
   const gsd = currentGSD();
   $('gsd').value = gsd ? `${gsd.toFixed(4)} mm/px` : '';
+  // どれを採用したかを必ず出す。3通りあるので、黙って切り替わると事故になる
+  $('gsdSource').textContent = gsd ? `採用: ${gsdSourceName()}` : '';
   updateSteps();
   renderQuickCheck();
 }
+
+function gsdSourceName() {
+  const referenceMM = parseFloat($('referenceLength').value);
+  const referencePx = parseFloat($('referencePair').value);
+  if (referenceMM > 0 && referencePx > 0) return '既知の基準距離';
+  if (cloudGSD() > 0) return '点群（斜め補正あり）';
+  return '撮影距離 × 焦点距離';
+}
+
+/**
+ * 点群パネルに渡すカメラ内部パラメータ。
+ * 焦点距離は EXIF（または手入力）由来なので、写真が無い間は null を返す。
+ */
+function cameraIntrinsics() {
+  if (!state.files.length) return null;
+  const focal35 = parseFloat($('focal35').value);
+  if (!(focal35 > 0)) return null;
+  const { width, height } = state.files[0].imageData;
+  const focalLengthPx = focalLengthPxFrom35mm({
+    focal35mm: focal35,
+    imageWidthPx: Math.max(width, height),
+  });
+  if (!(focalLengthPx > 0)) return null;
+  return { focalLengthPx, cx: width / 2, cy: height / 2, width, height };
+}
+
+initCloudPanel({
+  getIntrinsics: cameraIntrinsics,
+  onChange: updateGSD,
+});
 
 // ═══════════════════════════════════════════ 解析範囲
 

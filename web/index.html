@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>σ実測ツール — き裂追跡測定の検出限界を測る</title>
 <link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icon.svg">
 <meta name="theme-color" content="#0f1512">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -210,7 +211,8 @@
   th { color: var(--ink-soft); font-weight: 600; font-size: 11.5px; }
   td.num, th.num { text-align: right; }
 
-  canvas#fieldCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); }
+  canvas#fieldCanvas, canvas#bulgeCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); }
+  canvas#bulgeCanvas { image-rendering: pixelated; display: block; }
   .hidden { display: none !important; }
   a { color: var(--amber); }
 
@@ -263,6 +265,7 @@
         <div>
           <label>分解能 GSD</label>
           <input type="text" id="gsd" readonly placeholder="—">
+          <p class="note" id="gsdSource" style="margin-top:5px"></p>
         </div>
       </div>
 
@@ -282,6 +285,62 @@
       </div>
 
       <p class="note">未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
+    </div>
+  </section>
+
+  <!-- 点群（任意）───────────────────────── -->
+  <section class="step" id="stepCloud" data-state="active">
+    <header><span class="badge"><span>◆</span></span><h2>点群</h2><span class="step-note">任意・写真が無くても使えます</span></header>
+    <div class="body">
+      <p class="note" style="margin-top:0">
+        Scaniverse などで撮った点群を読み込むと、<b>スケール</b>（距離と斜角）が決まり、
+        さらに写真には出ない<b>面外のはらみ出し</b>が測れます。
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="cloudBtn">点群を読み込む（PLY / LAS）</button>
+        <button id="cloudClear" style="padding:6px 12px;font-size:12.5px">外す</button>
+        <input type="file" id="cloudInput" accept=".ply,.las,.PLY,.LAS" class="hidden">
+      </div>
+
+      <div id="cloudControls" class="hidden" style="margin-top:12px">
+        <div class="row">
+          <div>
+            <label>上方向の軸</label>
+            <select id="cloudUp">
+              <option value="y">Y（Scaniverse など ARKit 由来）</option>
+              <option value="z">Z（LAS で一般的）</option>
+            </select>
+          </div>
+          <div>
+            <label>セルの一辺（mm）</label>
+            <input type="number" id="cloudCell" value="50" min="5" max="500" step="5" inputmode="numeric">
+          </div>
+        </div>
+        <p class="note">上方向は面外マップの向きにだけ効きます。外しても測定値は変わりません。</p>
+      </div>
+
+      <div id="cloudSummary" style="margin-top:12px"></div>
+      <p class="note">
+        <b>スキャンを開始した位置から写真を撮ってください。</b>
+        点群の原点＝スキャン開始地点なので、これで視点が決まります。
+        10m に対して立ち位置が 0.3m ずれてもスケール誤差は 3%、
+        追跡計測（変化量）では 0.10mm の開きに対して 0.003mm しか効きません。
+      </p>
+    </div>
+  </section>
+
+  <!-- 点群の結果 ───────────────────────── -->
+  <section class="step hidden" id="cloudResults" data-state="done">
+    <header><span class="badge"><span>✓</span></span><h2>面外のはらみ出し</h2><span class="step-note">点群から</span></header>
+    <div class="body">
+      <p class="note" style="margin-top:0">
+        き裂の開き（面内）は写真の方が2桁精度が高いのでここでは扱いません。
+        点群にしか出せないのは<b>面外</b>、つまり石材が手前に出てきているかどうかです。
+        剥落の前兆はここに出ます。
+      </p>
+      <canvas id="bulgeCanvas"></canvas>
+      <p class="note" id="bulgeLegend"></p>
+      <div id="bulgeTable" class="scroll-x"></div>
     </div>
   </section>
 
