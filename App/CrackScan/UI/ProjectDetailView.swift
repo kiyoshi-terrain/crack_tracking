@@ -164,7 +164,7 @@ struct ProjectDetailView: View {
                 try await runner.generateModel(
                     imagesDirectory: images,
                     outputURL: output,
-                    detail: .medium
+                    detail: .reduced
                 ) { fraction in
                     Task { @MainActor in
                         modelGeneration?.progress = fraction

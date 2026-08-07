@@ -12,22 +12,26 @@ import RealityKit
 @available(iOS 17.0, *)
 actor PhotogrammetryRunner {
 
+    /// 生成する 3D モデルの詳細度。
+    ///
+    /// **iOS で使えるのは `.preview` と `.reduced` だけです。**
+    /// `.medium` / `.full` / `.raw` は macOS 専用で、iOS SDK には存在しません
+    /// （メモリと熱の制約によるもの）。より高精細なモデルが要る場合は、
+    /// 撮影データを Mac へ持ち出して処理する運用になります。
     enum Detail: String, CaseIterable, Sendable {
-        case reduced, medium, full
+        case preview, reduced
 
         var requestDetail: PhotogrammetrySession.Request.Detail {
             switch self {
+            case .preview: return .preview
             case .reduced: return .reduced
-            case .medium: return .medium
-            case .full: return .full
             }
         }
 
         var displayName: String {
             switch self {
-            case .reduced: return "軽量（速い）"
-            case .medium: return "標準"
-            case .full: return "高精細（時間がかかる）"
+            case .preview: return "プレビュー（速い・粗い）"
+            case .reduced: return "標準（iOS で選べる最高）"
             }
         }
     }
@@ -60,7 +64,7 @@ actor PhotogrammetryRunner {
     func generateModel(
         imagesDirectory: URL,
         outputURL: URL,
-        detail: Detail = .medium,
+        detail: Detail = .reduced,
         onProgress: @escaping (Double) -> Void
     ) async throws {
         guard PhotogrammetrySession.isSupported else { throw RunnerError.unsupportedDevice }
