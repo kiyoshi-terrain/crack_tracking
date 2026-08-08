@@ -13,7 +13,8 @@ import { summarize, detectionLimit, computeGSD, focalLengthPxFrom35mm } from './
 import { speckleQuality, focusScore } from './speckle.js';
 import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
-import { initHistoryPanel, refreshHistoryPanel } from './historypanel.js';
+import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
+import { initShell, updateHud, setViewfinderHint, openSheet } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -52,10 +53,15 @@ $('clearBtn').addEventListener('click', () => {
   state.files = [];
   state.roi = null;
   state.lastResult = null;
+  state.limit = null;
+  state.measurement = null;
+  state.preview = null;
   $('thumbs').innerHTML = '';
   $('quickCheck').innerHTML = '';
   $('fileWarnings').innerHTML = '';
-  $('results').classList.add('hidden');
+  $('preview').querySelectorAll('canvas').forEach((c) => c.remove());
+  $('roiBox').style.display = 'none';
+  setViewfinderHint(null);
   updateSteps();
 });
 
@@ -166,26 +172,137 @@ function renderQuickCheck() {
       ピント ${latest.focus.toFixed(4)}${gsd ? ` ／ 分解能 ${gsd.toFixed(4)} mm/px` : ' ／ 分解能は撮影距離の入力後'}
     </span>
   </div></div>`;
+
+  // 撮り直しが効くうちに気づかせたいので、シートを開かなくても見える所に出す。
+  // 良好なときは何も出さない（常時何か言っていると読まれなくなる）
+  const focus = focusLamp(latest);
+  if (cls === 'bad') {
+    setViewfinderHint(`模様が乏しく DIC が成立しません — ${latest.quality.reason}`, 'bad');
+  } else if (focus === 'bad') {
+    setViewfinderHint('この枚はピントが外れています。撮り直してください', 'bad');
+  } else if (cls === 'warn' || focus === 'warn') {
+    setViewfinderHint(latest.quality.reason, 'warn');
+  } else {
+    setViewfinderHint(null);
+  }
 }
 
 // ═══════════════════════════════════════════ ステップ状態
 
 function updateSteps() {
   const n = state.files.length;
-  const hasScale = currentGSD() != null;
+  const gsd = currentGSD();
+  const latest = state.files[n - 1];
+  const cloudScale = cloudState.scale;
 
-  setStep('step1', n >= 2 ? 'done' : 'active', n ? `${n} 枚` : '2枚以上');
-  setStep('step2', n === 0 ? 'locked' : hasScale ? 'done' : 'active', hasScale ? '' : 'mm換算に必要');
-  setStep('step3', n === 0 ? 'locked' : 'active', state.roi ? `${state.roi.width}×${state.roi.height} px` : '');
-  setStep('step4', n >= 2 ? 'active' : 'locked');
-  $('run').disabled = n < 2;
+  setNote('note1', n ? `${n} 枚` : '2枚以上');
+  setNote('note2', gsd ? `${gsd.toFixed(4)} mm/px` : 'mm換算に必要');
+  setNote('note3', state.roi ? `${state.roi.width}×${state.roi.height} px` : '');
+
+  // レールのドットは「使えるか」ではなく「良いか」。
+  // 未評価（灰）と良好（緑）を区別する
+  ready('photo', latest ? worse(verdictToLamp(latest.quality.verdict), focusLamp(latest)) : null);
+  ready('scale', gsd != null ? 'good' : null);
+  ready('cloud', cloudState.plane ? (cloudState.plane.inlierRatio < 0.6 ? 'warn' : 'good') : null);
+  ready('analyze', state.roi ? 'good' : null);
+  ready('result', state.measurement != null ? 'good' : null);
+  ready('history', historyLamp());
+
+  updateHud({
+    frames: n,
+    gsd,
+    distanceM: cloudState.plane
+      ? (cloudState.plane.viewpointDistance * cloudState.unit.scale) / 1000
+      : (parseFloat($('distance').value) || null),
+    obliquityDeg: cloudScale?.centre?.obliquityDeg ?? null,
+    limitMM: state.limit?.mm ?? null,
+    limitPx: state.limit?.px ?? null,
+  });
+
+  $('vfEmpty').classList.toggle('hidden', n > 0);
+  updateScopes();
 }
 
-function setStep(id, stateName, note) {
+function setNote(id, text) {
   const el = $(id);
-  el.dataset.state = stateName;
-  const noteEl = $(id.replace('step', 'note'));
-  if (noteEl && note !== undefined) noteEl.textContent = note;
+  if (el && text !== undefined) el.textContent = text;
+}
+
+function ready(name, state) {
+  const el = $(`rail-${name}`);
+  if (el) el.dataset.ready = state ?? 'idle';
+}
+
+/** 悪い方を採る。良否をまとめるときは必ず悪い側に寄せる。 */
+function worse(a, b) {
+  const rank = { bad: 3, warn: 2, good: 1 };
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b;
+}
+
+function verdictToLamp(verdict) {
+  return verdict === 'good' ? 'good' : verdict === 'fair' ? 'warn' : 'bad';
+}
+
+/**
+ * ピントのランプ。
+ * 絶対値はレンズと被写体で変わるので、セッション内の中央値と比べて判定する。
+ */
+function focusLamp(file) {
+  const values = state.files.map((f) => f.focus).filter((v) => isFinite(v)).sort((a, b) => a - b);
+  if (!values.length) return null;
+  const median = values[values.length >> 1];
+  if (!(median > 0)) return 'bad';
+  const ratio = file.focus / median;
+  return ratio < 0.6 ? 'bad' : ratio < 0.85 ? 'warn' : 'good';
+}
+
+function historyLamp() {
+  const h = historySummary();
+  if (!h.stationCount) return null;
+  if (h.significant == null) return 'warn';
+  return h.significant ? 'bad' : 'good';
+}
+
+/**
+ * スコープ帯。カメラのヒストグラム・音声メーターに相当する常時表示。
+ * ここに出るのは「撮り直すべきか」「有意か」だけに絞る。
+ */
+function updateScopes() {
+  const latest = state.files[state.files.length - 1];
+
+  if (latest) {
+    // MIG は 0.02 も出れば十分。そこを満点として目盛る
+    setBar('barTexture', latest.quality.mig / 0.02, verdictToLamp(latest.quality.verdict));
+    setBar('barFocus', latest.focus / 0.35, focusLamp(latest));
+    $('scopeQualityNote').textContent = latest.quality.reason;
+  } else {
+    setBar('barTexture', 0, null);
+    setBar('barFocus', 0, null);
+    $('scopeQualityNote').textContent = '写真を読み込むと判定します';
+  }
+
+  const limit = state.limit;
+  $('scopeLimit').textContent = limit
+    ? `${limit.mm != null ? limit.mm.toFixed(4) : limit.px.toFixed(3)}`
+    : '—';
+  $('scopeLimitNote').textContent = limit
+    ? `${limit.mm != null ? 'mm' : 'px'}・${limit.frames} 枚平均・${limit.method}`
+    : 'σ を実測してください';
+
+  const h = historySummary();
+  $('scopeDelta').textContent = h.deltaMM != null
+    ? `${h.deltaMM > 0 ? '+' : ''}${h.deltaMM.toFixed(4)}`
+    : '—';
+  $('scopeDeltaNote').textContent = h.note;
+}
+
+function setBar(id, fraction, lamp) {
+  const el = $(id);
+  if (!el) return;
+  el.style.width = `${Math.max(0, Math.min(1, fraction || 0)) * 100}%`;
+  el.className = lamp === 'bad' ? 'bad' : lamp === 'warn' ? 'warn' : '';
 }
 
 // ═══════════════════════════════════════════ スケール
@@ -263,7 +380,16 @@ initCloudPanel({
 });
 
 // 経時管理は解析結果を受け取るだけで、解析には関与しない
-initHistoryPanel({ getMeasurement: () => state.measurement ?? null });
+initHistoryPanel({
+  getMeasurement: () => state.measurement ?? null,
+  onChange: updateSteps,
+});
+
+initShell();
+updateSteps();
+
+// 画面の向きが変わるとビューファインダーの実寸が変わる。ROI の枠を置き直す
+window.addEventListener('shell:resize', () => { if (state.roi) setRoi(state.roi); });
 
 // ═══════════════════════════════════════════ 解析範囲
 
@@ -405,9 +531,9 @@ async function analyze() {
 
   log('');
   renderVerdict(dicStats, targetSigma);
+  updateSteps();
   if (lastField) drawField(lastField); else $('fieldCanvas').classList.add('hidden');
-  $('results').classList.remove('hidden');
-  $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  openSheet('result');
 }
 
 // ═══════════════════════════════════════════ 結果表示
@@ -426,6 +552,9 @@ function renderVerdict(dicStats, targetSigma) {
       <div class="answer">σ を算出できませんでした。</div>
       <div class="sub">模様が乏しいか、ターゲットが検出できていません。解析範囲と方式を見直してください。</div>`;
     $('stats').innerHTML = '';
+    state.limit = null;
+    state.measurement = null;
+    updateSteps();
     return;
   }
 
@@ -445,6 +574,11 @@ function renderVerdict(dicStats, targetSigma) {
   refreshHistoryPanel();
   const unit = gsd ? 'mm' : 'px';
   const value = gsd ? limit.detectionLimitMM : 3 * Math.SQRT2 * best.sigma / Math.sqrt(frames);
+  state.limit = {
+    mm: gsd ? limit.detectionLimitMM : null,
+    px: 3 * Math.SQRT2 * best.sigma / Math.sqrt(frames),
+    frames, method: best.name,
+  };
 
   $('verdict').innerHTML = `
     <div class="eyebrow">この機材・この条件での検出限界</div>

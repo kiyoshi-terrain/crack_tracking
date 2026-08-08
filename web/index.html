@@ -7,13 +7,14 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icon.svg">
-<meta name="theme-color" content="#0f1512">
+<meta name="theme-color" content="#0b0f0d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <style>
   /* ダークアウトドアテーマ（フォレストグリーン + アンバー）
-     field-note-app のロードマップで定めた現場ツール共通の方針に揃えています。 */
+     field-note-app のロードマップで定めた現場ツール共通の方針に揃えています。
+     配置は Blackmagic Camera 型: 常時ビューファインダー + HUD + レール。 */
   :root {
-    --ground:   #0f1512;
+    --ground:   #0b0f0d;
     --panel:    #161d19;
     --panel-2:  #1c2620;
     --line:     #253028;
@@ -21,68 +22,276 @@
     --ink-soft: #94a69c;
     --ink-dim:  #67766d;
 
-    --amber:    #d99a2b;   /* 操作・主要な数値 */
+    --amber:    #d99a2b;
     --amber-dim:#8a6420;
-    --forest:   #4a9d72;   /* 良好 */
-    --critical: #c9564e;   /* 不可 */
+    --forest:   #4a9d72;
+    --critical: #c9564e;
 
+    --rail: 92px;
+    --hud: 54px;
+    --scope: 76px;
     --radius: 10px;
-    --shadow: 0 1px 2px rgba(0,0,0,.4);
   }
 
   * { box-sizing: border-box; }
+  /* グリッド／フレックスの自動最小値は min-content。
+     折り返さないテキストが1つあるだけで枠ごと画面外へ広がるので、明示的に潰す */
+  .app > *, .scope, .rail-modes, .hud-item { min-width: 0; }
+  html, body { height: 100%; }
   html { -webkit-text-size-adjust: 100%; }
   body {
-    margin: 0; background: var(--ground); color: var(--ink);
+    margin: 0; background: #000; color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-    line-height: 1.65; font-size: 15px;
-    padding-bottom: env(safe-area-inset-bottom);
+    line-height: 1.6; font-size: 15px;
+    overflow: hidden;
   }
-  .mono, .num {
+  .mono, .num, .hud-v, .scope-v {
     font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-variant-numeric: tabular-nums;
   }
 
-  /* ── 骨格 ─────────────────────────────── */
-  header {
-    padding: 18px 20px 14px; border-bottom: 1px solid var(--line);
-    background: linear-gradient(180deg, #131a16, var(--ground));
+  /* ── 骨格 ───────────────────────────────── */
+  .app {
+    position: fixed; inset: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--rail);
+    grid-template-rows: var(--hud) minmax(0, 1fr) var(--scope);
+    grid-template-areas: "hud rail" "vf rail" "scope rail";
+    background: var(--ground);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
-  header h1 { font-size: 17px; margin: 0; letter-spacing: .01em; }
-  header p { margin: 4px 0 0; color: var(--ink-soft); font-size: 13px; max-width: 62ch; }
-  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 64px; }
 
-  /* ── ステップ ─────────────────────────── */
-  .step {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
-    transition: opacity .2s, border-color .2s;
+  /* 縦持ちではレールを下へ。片手で親指の届く側に置く */
+  @media (max-aspect-ratio: 1/1) {
+    :root { --rail: 104px; }
+    .app {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: var(--hud) minmax(0, 1fr) var(--scope) var(--rail);
+      grid-template-areas: "hud" "vf" "scope" "rail";
+    }
   }
-  .step[data-state="locked"] { opacity: .42; pointer-events: none; }
-  .step[data-state="done"] { border-color: #2e4a3b; }
-  .step > header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 16px; background: none; border: 0; border-bottom: 1px solid var(--line);
-  }
-  .step > header h2 { font-size: 14px; margin: 0; font-weight: 600; flex: 1; }
-  .step .body { padding: 16px; }
 
-  .badge {
-    width: 22px; height: 22px; border-radius: 50%; flex: none;
+  /* ── HUD ────────────────────────────────── */
+  .hud {
+    grid-area: hud;
+    display: flex; align-items: stretch;
+    background: #0d1210; border-bottom: 1px solid var(--line);
+    overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .hud::-webkit-scrollbar { display: none; }
+  .hud-item {
+    flex: 0 0 auto; min-width: 82px;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 4px 12px; border: 0; border-right: 1px solid var(--line);
+    background: none; color: var(--ink); text-align: left;
+    font: inherit; cursor: pointer;
+  }
+  .hud-item:hover { background: #131b16; }
+  .hud-item:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+  .hud-k { font-size: 9.5px; letter-spacing: .08em; color: var(--ink-dim); text-transform: uppercase; }
+  .hud-v { font-size: 17px; font-weight: 600; line-height: 1.15; }
+  .hud-u { font-size: 10px; color: var(--ink-dim); margin-left: 2px; font-weight: 400; }
+  .hud-item[data-state="idle"] .hud-v { color: var(--ink-dim); }
+  .hud-item[data-state="ok"]   .hud-v { color: var(--ink); }
+  .hud-item[data-state="warn"] .hud-v { color: var(--amber); }
+
+  @media (max-width: 620px) {
+    .shutter { width: 56px; height: 56px; font-size: 18px; }
+    .mini { width: 36px; height: 36px; }
+    .hud-item { min-width: 64px; padding: 4px 8px; }
+    .hud-v { font-size: 15px; }
+        .scope { padding: 6px 9px; }
+    .scope-v { font-size: 18px; }
+  }
+
+  /* ── ビューファインダー ─────────────────── */
+  .vf {
+    grid-area: vf; position: relative; overflow: hidden;
+    background: repeating-linear-gradient(45deg, #0a0e0c 0 12px, #0c110e 12px 24px);
     display: grid; place-items: center;
-    font-size: 11px; font-weight: 700;
-    font-family: SFMono-Regular, Menlo, monospace;
-    background: var(--panel-2); color: var(--ink-dim);
-    border: 1px solid var(--line);
   }
-  .step[data-state="active"] .badge { background: var(--amber); color: #1a1206; border-color: var(--amber); }
-  .step[data-state="done"] .badge { background: var(--forest); color: #08130d; border-color: var(--forest); }
-  .step[data-state="done"] .badge::after { content: "✓"; }
-  .step[data-state="done"] .badge span { display: none; }
-  .step-note { margin-left: auto; font-size: 12px; color: var(--ink-soft); }
+  #preview { position: relative; display: inline-block; max-width: 100%; max-height: 100%; line-height: 0; }
+  #preview canvas {
+    display: block; max-width: 100%; max-height: 100%;
+    cursor: crosshair; touch-action: none;
+  }
+  #roiBox {
+    position: absolute; border: 1.5px solid var(--amber);
+    background: rgba(217,154,43,.08); pointer-events: none; display: none;
+  }
+  /* 三分割線。画像の上にだけ引く。ビューファインダー全体に引くと
+     画像の縁とずれて、構図の基準として使えなくなる */
+  .vf-grid { position: absolute; inset: 0; pointer-events: none; opacity: .13; }
+  #preview:not(:has(canvas)) .vf-grid { display: none; }
+  .vf-grid::before {
+    content: ""; position: absolute; left: 33.33%; right: 33.33%; top: 0; bottom: 0;
+    border-left: 1px solid #fff; border-right: 1px solid #fff;
+  }
+  .vf-grid::after {
+    content: ""; position: absolute; top: 33.33%; bottom: 33.33%; left: 0; right: 0;
+    border-top: 1px solid #fff; border-bottom: 1px solid #fff;
+  }
 
-  /* ── 入力 ─────────────────────────────── */
-  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .vf-empty {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--ink-dim); font-size: 13px; text-align: center; padding: 24px;
+    pointer-events: none;
+  }
+  .vf-empty b { display: block; color: var(--ink-soft); font-size: 15px; margin-bottom: 6px; }
+
+  #vfHint {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    max-width: min(92%, 560px); text-align: center;
+    padding: 7px 14px; border-radius: 999px; font-size: 12.5px;
+    background: rgba(10,14,12,.88); border: 1px solid var(--line);
+  }
+  #vfHint[data-kind="warn"] { border-color: rgba(217,154,43,.55); color: var(--amber); }
+  #vfHint[data-kind="bad"]  { border-color: rgba(201,86,78,.55); color: var(--critical); }
+
+  #log {
+    position: absolute; left: 12px; top: 10px;
+    font-size: 11.5px; color: var(--ink-soft);
+    font-family: SFMono-Regular, Menlo, monospace;
+    background: rgba(10,14,12,.8); padding: 3px 9px; border-radius: 6px;
+  }
+  #log:empty { display: none; }
+
+  .progress {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: #1b2620; display: none;
+  }
+  .progress.on { display: block; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--amber); transition: width .18s; }
+
+  /* ── スコープ帯 ─────────────────────────── */
+  .scopes {
+    grid-area: scope; display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px; background: var(--line);
+    border-top: 1px solid var(--line);
+  }
+  .scope {
+    background: #0d1210; padding: 7px 12px; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: center;
+    border: 0; border-radius: 0; text-align: left; font: inherit; color: var(--ink); cursor: pointer;
+  }
+  .scope:hover { background: #131b16; }
+  .scope:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+  .scope-k { font-size: 9.5px; letter-spacing: .08em; color: var(--ink-dim); text-transform: uppercase; }
+  .scope-v { font-size: 21px; font-weight: 700; line-height: 1.25; }
+  .scope-s { font-size: 10.5px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bars { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 3px; }
+  .bar { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--ink-dim); }
+  .bar u { flex: 1; height: 4px; border-radius: 2px; background: #1b2620; overflow: hidden; text-decoration: none; }
+  .bar u b { display: block; height: 100%; width: 0; background: var(--forest); transition: width .2s; }
+  .bar u b.warn { background: var(--amber); }
+  .bar u b.bad  { background: var(--critical); }
+
+  /* ── レール ─────────────────────────────── */
+  .rail {
+    grid-area: rail; background: #000;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 2px; padding: 8px 4px;
+    border-left: 1px solid var(--line);
+  }
+  .rail-modes {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    min-height: 0; overflow-y: auto; scrollbar-width: none;
+  }
+  .rail-modes::-webkit-scrollbar { display: none; }
+  @media (max-aspect-ratio: 1/1) {
+    .rail { flex-direction: row; border-left: 0; border-top: 1px solid var(--line); padding: 6px 4px; }
+    /* モード列だけを流す。σ は現場で一番押すので、切れない位置に固定する */
+    /* min-width:0 が無いと flex アイテムが内容幅より縮まず、σ が画面外へ押し出される */
+    .rail-modes { flex-direction: row; flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+  }
+  .rail-btn {
+    -webkit-appearance: none; appearance: none; border: 0; background: none;
+    color: var(--ink-dim); font: inherit; font-size: 10.5px; font-weight: 600;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 6px; border-radius: 9px; cursor: pointer; min-width: 58px; flex: 0 0 auto;
+  }
+  .rail-btn svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .rail-btn:hover { background: #131b16; color: var(--ink-soft); }
+  .rail-btn.on { background: rgba(217,154,43,.16); color: var(--amber); }
+  .rail-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+  /* ドットは「使えるか」ではなく「良いか」を出す。
+     未評価と良好を同じ見た目にしないこと。「測っていない」と「問題なし」は違う */
+  .rail-btn .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; }
+  .rail-btn[data-ready="good"] .dot { background: var(--forest); }
+  .rail-btn[data-ready="warn"] .dot { background: var(--amber); }
+  .rail-btn[data-ready="bad"]  .dot { background: var(--critical); }
+
+  .shutter-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 10px 0 4px; flex: 0 0 auto; }
+  @media (max-aspect-ratio: 1/1) { .shutter-wrap { flex-direction: row-reverse; margin: 0 2px 0 8px; gap: 6px; } }
+
+  .shutter {
+    -webkit-appearance: none; appearance: none;
+    width: 62px; height: 62px; border-radius: 50%;
+    border: 3px solid #fff; background: var(--amber);
+    color: #1a1206; font-weight: 800; font-size: 20px;
+    font-family: SFMono-Regular, Menlo, monospace;
+    display: grid; place-items: center; cursor: pointer;
+    box-shadow: 0 0 0 3px #000 inset;
+    transition: transform .1s, background .15s;
+  }
+  .shutter:hover:not(:disabled) { background: #e8aa3c; }
+  .shutter:active:not(:disabled) { transform: scale(.94); }
+  .shutter:disabled { background: #2a352e; border-color: #3d4a43; color: var(--ink-dim); cursor: not-allowed; }
+  .shutter:focus-visible { outline: 2px solid var(--amber); outline-offset: 4px; }
+
+  .mini {
+    -webkit-appearance: none; appearance: none;
+    width: 40px; height: 40px; border-radius: 50%; padding: 0;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-soft);
+    display: grid; place-items: center; cursor: pointer;
+  }
+  .mini svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+  .mini:hover { background: #223029; color: var(--ink); }
+  .mini:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  /* ── シート ─────────────────────────────── */
+  #sheetBackdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 40;
+  }
+  body.sheet-open #sheetBackdrop { opacity: 1; pointer-events: auto; }
+
+  .sheet {
+    position: fixed; z-index: 50;
+    top: 0; bottom: 0; right: var(--rail); width: min(560px, calc(100vw - var(--rail)));
+    background: var(--panel); border-left: 1px solid var(--line);
+    transform: translateX(105%); transition: transform .22s ease;
+    display: flex; flex-direction: column; visibility: hidden;
+    box-shadow: -14px 0 32px rgba(0,0,0,.5);
+  }
+  .sheet.sheet-active { transform: none; visibility: visible; }
+  @media (max-aspect-ratio: 1/1) {
+    .sheet {
+      right: 0; left: 0; width: auto; top: auto;
+      bottom: var(--rail); max-height: calc(100dvh - var(--rail) - 32px);
+      border-left: 0; border-top: 1px solid var(--line);
+      border-radius: 14px 14px 0 0;
+      transform: translateY(105%);
+      box-shadow: 0 -14px 32px rgba(0,0,0,.5);
+    }
+  }
+  .sheet > header {
+    display: flex; align-items: center; gap: 10px; flex: none;
+    padding: 13px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+  }
+  .sheet > header h2 { font-size: 14px; margin: 0; font-weight: 600; flex: 1; }
+  .sheet-note { font-size: 11.5px; color: var(--ink-soft); font-family: SFMono-Regular, Menlo, monospace; }
+  .sheet-close {
+    -webkit-appearance: none; appearance: none; border: 0; background: none;
+    color: var(--ink-soft); font-size: 22px; line-height: 1; cursor: pointer; padding: 2px 6px;
+  }
+  .sheet-close:hover { color: var(--ink); }
+  .sheet .body { padding: 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; flex: 1; }
+
+  /* ── 入力 ───────────────────────────────── */
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
   label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; }
   input, select {
     width: 100%; background: #0c110e; color: var(--ink);
@@ -93,9 +302,10 @@
   input[readonly] { color: var(--ink-soft); background: #0a0e0c; }
 
   button {
-    appearance: none; border: 1px solid transparent; border-radius: 8px;
+    -webkit-appearance: none; appearance: none;
+    border: 1px solid var(--line); border-radius: 8px;
     font: inherit; font-weight: 600; padding: 11px 18px; cursor: pointer;
-    background: var(--panel-2); color: var(--ink); border-color: var(--line);
+    background: var(--panel-2); color: var(--ink);
   }
   button:hover:not(:disabled) { background: #223029; }
   button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
@@ -103,18 +313,17 @@
   button.primary { background: var(--amber); color: #1a1206; border-color: var(--amber); }
   button.primary:hover:not(:disabled) { background: #e8aa3c; }
   button.wide { width: 100%; padding: 14px; font-size: 16px; }
-
   .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
 
-  /* ── 写真サムネイル ────────────────────── */
+  /* ── 写真サムネイル ─────────────────────── */
   #drop {
-    border: 1.5px dashed var(--line); border-radius: 9px; padding: 22px 16px;
+    border: 1.5px dashed var(--line); border-radius: 9px; padding: 20px 16px;
     text-align: center; color: var(--ink-soft); cursor: pointer; font-size: 13.5px;
     transition: .15s; margin-top: 12px;
   }
   #drop:hover, #drop.over { border-color: var(--amber); color: var(--ink); background: #17201a; }
 
-  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-top: 14px; }
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 9px; margin-top: 14px; }
   .thumb { position: relative; border-radius: 8px; overflow: hidden; background: #0a0e0c; border: 1px solid var(--line); }
   .thumb.reference { border-color: var(--amber); }
   .thumb img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover; }
@@ -139,7 +348,7 @@
   .dot.warn { background: var(--amber); }
   .dot.bad  { background: var(--critical); }
 
-  /* ── 通知 ─────────────────────────────── */
+  /* ── 通知 ───────────────────────────────── */
   .note { color: var(--ink-soft); font-size: 12.5px; margin: 10px 0 0; }
   .banner {
     padding: 10px 13px; border-radius: 8px; font-size: 13.5px; margin-bottom: 10px;
@@ -153,57 +362,28 @@
   .banner.bad  { background: rgba(201,86,78,.11); border-color: rgba(201,86,78,.4); }
   .banner.bad::before { content: "×"; color: var(--critical); }
 
-  /* ── 解析範囲 ─────────────────────────── */
-  #preview { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
-  #preview canvas { display: block; max-width: 100%; border-radius: 8px; cursor: crosshair; touch-action: none; }
-  #roiBox {
-    position: absolute; border: 2px solid var(--amber);
-    background: rgba(217,154,43,.1); pointer-events: none; display: none;
-  }
-
-  /* ── 詳細設定 ─────────────────────────── */
   details.advanced { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
-  details.advanced summary {
-    cursor: pointer; font-size: 13px; color: var(--ink-soft); list-style: none;
-    display: flex; align-items: center; gap: 6px;
-  }
+  details.advanced summary { cursor: pointer; color: var(--ink-soft); font-size: 13px; list-style: none; }
   details.advanced summary::-webkit-details-marker { display: none; }
-  details.advanced summary::before { content: "▸"; transition: transform .15s; }
-  details.advanced[open] summary::before { transform: rotate(90deg); }
-  details.advanced .row { margin-top: 12px; }
+  details.advanced summary::before { content: "▸ "; }
+  details.advanced[open] summary::before { content: "▾ "; }
 
-  /* ── 進捗 ─────────────────────────────── */
-  .progress { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 12px; display: none; }
-  .progress.on { display: block; }
-  .progress i { display: block; height: 100%; background: var(--amber); width: 0; transition: width .2s; }
-  #log { font-size: 12.5px; color: var(--ink-soft); margin-top: 8px; min-height: 1.2em; }
+  .verdict { border: 1px solid var(--amber-dim); background: rgba(217,154,43,.07);
+             border-radius: 9px; padding: 14px 16px; margin-bottom: 14px; }
+  .verdict .eyebrow { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--amber); }
+  .verdict .answer { font-size: 18px; margin-top: 5px; }
+  .verdict .answer b { font-family: SFMono-Regular, Menlo, monospace; font-size: 26px; color: var(--amber); }
+  .verdict .sub { font-size: 12.5px; color: var(--ink-soft); margin-top: 7px; }
 
-  /* ── 結果 ─────────────────────────────── */
-  .verdict {
-    background: linear-gradient(180deg, #1a241d, var(--panel-2));
-    border: 1px solid #2e4a3b; border-radius: var(--radius);
-    padding: 20px; margin-bottom: 16px;
-  }
-  .verdict .eyebrow {
-    font-size: 11px; letter-spacing: .1em; color: var(--ink-soft);
-    text-transform: uppercase; margin-bottom: 8px;
-  }
-  .verdict .answer { font-size: 17px; line-height: 1.5; text-wrap: balance; }
-  .verdict .answer b {
-    font-family: SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
-    font-size: 30px; color: var(--amber); font-weight: 700; letter-spacing: -.02em;
-  }
-  .verdict .sub { color: var(--ink-soft); font-size: 13px; margin-top: 10px; }
-
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px;
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px;
            background: var(--line); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 16px; }
-  .stat { background: var(--panel); padding: 12px 14px; }
+  .stat { background: var(--panel); padding: 11px 13px; }
   .stat .k { font-size: 11px; color: var(--ink-soft); }
-  .stat .v { font-size: 20px; font-weight: 600; margin-top: 2px;
+  .stat .v { font-size: 19px; font-weight: 600; margin-top: 2px;
              font-family: SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 
   h3.sec { font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
-           color: var(--ink-soft); margin: 22px 0 10px; font-weight: 600; }
+           color: var(--ink-soft); margin: 20px 0 10px; font-weight: 600; }
 
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -211,27 +391,89 @@
   th { color: var(--ink-soft); font-weight: 600; font-size: 11.5px; }
   td.num, th.num { text-align: right; }
 
-  canvas#fieldCanvas, canvas#bulgeCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); }
-  canvas#bulgeCanvas { image-rendering: pixelated; display: block; }
-  canvas#trendCanvas { max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); display: block; margin-top: 14px; }
+  canvas#fieldCanvas, canvas#bulgeCanvas, canvas#trendCanvas {
+    max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); display: block;
+  }
+  canvas#bulgeCanvas { image-rendering: pixelated; }
+  canvas#trendCanvas { margin-top: 14px; }
   .hidden { display: none !important; }
   a { color: var(--amber); }
-
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>σ実測ツール</h1>
-  <p>同じ場所から連続撮影した写真から、測定ノイズ σ を実測します。構造物は数分では動かないので、そこで出た「変位」がそのままノイズです。</p>
-</header>
 
-<main>
-  <!-- 1 ───────────────────────────────── -->
-  <section class="step" id="step1" data-state="active">
-    <header><span class="badge"><span>1</span></span><h2>写真</h2><span class="step-note" id="note1">2枚以上</span></header>
+<div class="app">
+
+  <!-- HUD ─────────────────────────────────── -->
+  <div class="hud">
+    <button class="hud-item" data-sheet="photo" data-state="idle"><span class="hud-k">枚数</span><span><span class="hud-v" id="hudFrames">—</span></span></button>
+    <button class="hud-item" data-sheet="scale" data-state="idle"><span class="hud-k">MM/PX</span><span><span class="hud-v" id="hudGsd">—</span></span></button>
+    <button class="hud-item" data-sheet="cloud" data-state="idle"><span class="hud-k">距離</span><span><span class="hud-v" id="hudDistance">—</span><span class="hud-u">m</span></span></button>
+    <button class="hud-item" data-sheet="cloud" data-state="idle"><span class="hud-k">斜角</span><span><span class="hud-v" id="hudOblique">—</span></span></button>
+    <button class="hud-item" data-sheet="result" data-state="idle"><span class="hud-k">検出限界</span><span><span class="hud-v" id="hudLimit">—</span><span class="hud-u" id="hudLimitUnit"></span></span></button>
+  </div>
+
+  <!-- ビューファインダー ───────────────────── -->
+  <div class="vf" id="viewfinder">
+    <div id="preview"><div class="vf-grid"></div><div id="roiBox"></div></div>
+    <div class="vf-empty" id="vfEmpty">
+      <div>
+        <b>写真がまだありません</b>
+        右の「写真」から読み込むか、◉ で撮影してください。<br>
+        点群だけでも面外のはらみ出しは測れます。
+      </div>
+    </div>
+    <div id="log"></div>
+    <div id="vfHint" class="hidden"></div>
+    <div class="progress" id="progress"><i></i></div>
+  </div>
+
+  <!-- スコープ帯 ──────────────────────────── -->
+  <div class="scopes">
+    <button class="scope" data-sheet="photo">
+      <span class="scope-k">撮影品質</span>
+      <div class="bars">
+        <span class="bar">模様<u><b id="barTexture"></b></u></span>
+        <span class="bar">ピント<u><b id="barFocus"></b></u></span>
+      </div>
+      <span class="scope-s" id="scopeQualityNote">写真を読み込むと判定します</span>
+    </button>
+    <button class="scope" data-sheet="result">
+      <span class="scope-k">検出限界 3σ</span>
+      <span class="scope-v" id="scopeLimit">—</span>
+      <span class="scope-s" id="scopeLimitNote">σ を実測してください</span>
+    </button>
+    <button class="scope" data-sheet="history">
+      <span class="scope-k">前回との差</span>
+      <span class="scope-v" id="scopeDelta">—</span>
+      <span class="scope-s" id="scopeDeltaNote">測点を登録すると出ます</span>
+    </button>
+  </div>
+
+  <!-- レール ──────────────────────────────── -->
+  <div class="rail">
+    <div class="rail-modes">
+      <button class="rail-btn" data-sheet="photo" data-ready="idle" id="rail-photo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.6-2.2h4.8L16 6"/></svg><span>写真</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="scale" data-ready="idle" id="rail-scale"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18"/><path d="M6 9v6M10 10.5v3M14 10.5v3M18 9v6"/></svg><span>スケール</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="cloud" data-ready="idle" id="rail-cloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16l5-6 4 4 3-3 4 5z"/><circle cx="8" cy="6.5" r="1.4"/><circle cx="14" cy="5.5" r="1.1"/><circle cx="19" cy="8" r="1.1"/></svg><span>点群</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="analyze" data-ready="idle" id="rail-analyze"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M7.5 7.5h9v9h-9z" stroke-dasharray="2 2"/></svg><span>範囲</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="result" data-ready="idle" id="rail-result"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg><span>結果</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="history" data-ready="idle" id="rail-history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18l5-7 4 3 4-7 5 5"/><path d="M3 21h18"/></svg><span>経時</span><span class="dot"></span></button>
+    </div>
+    <div class="shutter-wrap">
+      <button class="mini" id="cameraBtn" title="その場で撮影" aria-label="その場で撮影"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.6-2.2h4.8L16 6"/></svg></button>
+      <button class="shutter" id="run" disabled title="σ を実測する" aria-label="σ を実測する">σ</button>
+    </div>
+  </div>
+
+</div>
+
+<div id="sheetBackdrop"></div>
+
+  <section class="sheet" id="step1">
+    <header><h2>写真</h2><span class="sheet-note" id="note1">2枚以上</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
-      <div class="btn-row">
+<div class="btn-row">
         <button class="primary" id="cameraBtn">その場で撮影</button>
         <button id="clearBtn">すべて削除</button>
       </div>
@@ -249,12 +491,10 @@
       <div id="quickCheck"></div>
     </div>
   </section>
-
-  <!-- 2 ───────────────────────────────── -->
-  <section class="step" id="step2" data-state="locked">
-    <header><span class="badge"><span>2</span></span><h2>スケール</h2><span class="step-note" id="note2">mm換算に必要</span></header>
+  <section class="sheet" id="step2">
+    <header><h2>スケール</h2><span class="sheet-note" id="note2">mm換算に必要</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
-      <div class="row">
+<div class="row">
         <div>
           <label>撮影距離（m）</label>
           <input type="number" id="distance" step="0.01" min="0.05" inputmode="decimal" placeholder="レーザー距離計の実測値">
@@ -288,12 +528,10 @@
       <p class="note">未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
     </div>
   </section>
-
-  <!-- 点群（任意）───────────────────────── -->
-  <section class="step" id="stepCloud" data-state="active">
-    <header><span class="badge"><span>◆</span></span><h2>点群</h2><span class="step-note">任意・写真が無くても使えます</span></header>
+  <section class="sheet" id="stepCloud">
+    <header><h2>点群</h2><span class="sheet-note">任意・写真が無くても使えます</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
-      <p class="note" style="margin-top:0">
+<p class="note" style="margin-top:0">
         Scaniverse などで撮った点群を読み込むと、<b>スケール</b>（距離と斜角）が決まり、
         さらに写真には出ない<b>面外のはらみ出し</b>が測れます。
       </p>
@@ -327,14 +565,9 @@
         10m に対して立ち位置が 0.3m ずれてもスケール誤差は 3%、
         追跡計測（変化量）では 0.10mm の開きに対して 0.003mm しか効きません。
       </p>
-    </div>
-  </section>
-
-  <!-- 点群の結果 ───────────────────────── -->
-  <section class="step hidden" id="cloudResults" data-state="done">
-    <header><span class="badge"><span>✓</span></span><h2>面外のはらみ出し</h2><span class="step-note">点群から</span></header>
-    <div class="body">
-      <p class="note" style="margin-top:0">
+      <div id="cloudResults" class="hidden">
+        <h3 class="sec">面外のはらみ出し</h3>
+<p class="note" style="margin-top:0">
         き裂の開き（面内）は写真の方が2桁精度が高いのでここでは扱いません。
         点群にしか出せないのは<b>面外</b>、つまり石材が手前に出てきているかどうかです。
         剥落の前兆はここに出ます。
@@ -342,14 +575,13 @@
       <canvas id="bulgeCanvas"></canvas>
       <p class="note" id="bulgeLegend"></p>
       <div id="bulgeTable" class="scroll-x"></div>
+      </div>
     </div>
   </section>
-
-  <!-- 3 ───────────────────────────────── -->
-  <section class="step" id="step3" data-state="locked">
-    <header><span class="badge"><span>3</span></span><h2>解析範囲と方式</h2><span class="step-note" id="note3"></span></header>
+  <section class="sheet" id="step3">
+    <header><h2>解析範囲と実行</h2><span class="sheet-note" id="note3"></span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
-      <div id="preview"><div id="roiBox"></div></div>
+<div id="preview"><div id="roiBox"></div></div>
       <p class="note">ドラッグで範囲を選択。未選択なら中央60%を使います。</p>
 
       <div class="row" style="margin-top:14px">
@@ -391,26 +623,15 @@
         </div>
         <p class="note">サブセットは大きいほど精度が上がり分解能が下がります。31px角（半径15）が標準的な出発点です。</p>
       </details>
-    </div>
-  </section>
-
-  <!-- 4 ───────────────────────────────── -->
-  <section class="step" id="step4" data-state="locked">
-    <header><span class="badge"><span>4</span></span><h2>実行</h2></header>
-    <div class="body">
-      <button class="primary wide" id="run" disabled>σ を実測する</button>
+<button class="primary wide" id="run" disabled>σ を実測する</button>
       <div class="progress" id="progress"><i></i></div>
       <div id="log"></div>
     </div>
   </section>
-
-  <!-- 結果 ─────────────────────────────── -->
-  <section class="step hidden" id="results" data-state="done">
-    <header><span class="badge"><span>✓</span></span><h2>結果</h2>
-      <button id="exportBtn" style="padding:6px 12px;font-size:12.5px">書き出す</button>
-    </header>
+  <section class="sheet" id="results">
+    <header><h2>結果</h2><button id="exportBtn" style="padding:6px 12px;font-size:12.5px">書き出す</button><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
-      <div class="verdict" id="verdict"></div>
+<div class="verdict" id="verdict"></div>
       <div class="stats" id="stats"></div>
       <div id="quality"></div>
       <div id="frameTable" class="scroll-x"></div>
@@ -421,12 +642,10 @@
       <p class="note" id="fieldNote"></p>
     </div>
   </section>
-
-  <!-- 経時管理 ─────────────────────────── -->
-  <section class="step" id="stepHistory" data-state="active">
-    <header><span class="badge"><span>◆</span></span><h2>経時管理</h2><span class="step-note">前回と比べる</span></header>
+  <section class="sheet" id="stepHistory">
+    <header><h2>経時管理</h2><span class="sheet-note">前回と比べる</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
-      <p class="note" style="margin-top:0">
+<p class="note" style="margin-top:0">
         測点を登録して、解析のたびに1回ぶんの観測として積みます。
         <b>2時期を比べるときは両日のばらつきが乗る</b>ので、
         差の検出限界は1日ぶんの 3σ より √2 倍ほど広くなります。ここはツールが計算します。
@@ -523,8 +742,6 @@
       </p>
     </div>
   </section>
-
-</main>
 
 <script type="module" src="./src/app.js"></script>
 </body>

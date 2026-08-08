@@ -23,9 +23,11 @@ const STORAGE_KEY = 'crack-tracking/history/v1';
 let stations = [];
 let selectedId = null;
 let getMeasurement = () => null;
+let onChange = () => {};
 
 export function initHistoryPanel(options = {}) {
   getMeasurement = options.getMeasurement ?? (() => null);
+  onChange = options.onChange ?? (() => {});
 
   stations = load();
   selectedId = stations[0]?.id ?? null;
@@ -50,6 +52,39 @@ export function initHistoryPanel(options = {}) {
 /** 解析が終わったら呼ぶ。記録フォームの選択肢を作り直す。 */
 export function refreshHistoryPanel() {
   renderRecordForm();
+}
+
+/**
+ * シェルのスコープ帯に出すための要約。
+ *
+ * 判定は必ず temperatureAdjusted 済みのものを返す。生の差を一瞥の位置に
+ * 出すと、温度で開いただけの測点が「進行」に見える。
+ */
+export function historySummary() {
+  const station = current();
+  const obs = station?.observations ?? [];
+
+  if (!stations.length) {
+    return { stationCount: 0, deltaMM: null, significant: null, note: '測点を登録すると出ます' };
+  }
+  if (obs.length < 2) {
+    return {
+      stationCount: stations.length, deltaMM: null, significant: null,
+      note: `${station?.name ?? ''} — 2回目から比較できます`,
+    };
+  }
+
+  const trend = fitTrend(obs);
+  const cmp = latestComparison(station, 3, trend);
+  const words = cmp.significant == null ? 'σ 未記録で判定不可'
+    : cmp.significant ? '有意な変化' : '有意差なし';
+
+  return {
+    stationCount: stations.length,
+    deltaMM: cmp.deltaMM,
+    significant: cmp.significant,
+    note: `${station.name} — ${words}${cmp.temperatureAdjusted ? '（温度補正後）' : ''}`,
+  };
 }
 
 // ---------------------------------------------------------------- 保存
@@ -217,6 +252,7 @@ function render() {
   renderStationSelect();
   renderRecordForm();
   renderHistory();
+  onChange();
 }
 
 function renderStationSelect() {

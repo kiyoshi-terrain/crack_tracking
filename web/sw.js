@@ -6,7 +6,7 @@
 //
 // 更新方法: ファイルを変えたら CACHE の版を上げる。
 
-const CACHE = 'sigma-tool-v2';
+const CACHE = 'sigma-tool-v3';
 
 // src/ 配下のモジュールは**全部**並べること。1本でも漏れると、
 // 圏外でその機能だけ静かに動かなくなる（targets.js が実際に漏れていた）。
@@ -16,6 +16,7 @@ const SHELL = [
   './manifest.webmanifest',
   './icon.svg',
   './src/app.js',
+  './src/shell.js',
   './src/dic.js',
   './src/transform.js',
   './src/sigma.js',
