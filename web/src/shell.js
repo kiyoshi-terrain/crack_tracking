@@ -52,9 +52,12 @@ export function initShell() {
   });
 }
 
+let lastFocus = null;
+
 export function openSheet(name) {
   const id = SHEETS[name];
   if (!id) return;
+  if (!openId) lastFocus = document.activeElement;
   openId = name;
   document.body.classList.add('sheet-open');
   Object.entries(SHEETS).forEach(([key, sectionId]) => {
@@ -63,14 +66,39 @@ export function openSheet(name) {
   document.querySelectorAll('[data-sheet]').forEach((el) => {
     el.classList.toggle('on', el.dataset.sheet === name);
   });
-  $(id).scrollTop = 0;
+  const sheet = $(id);
+  sheet.scrollTop = 0;
+  sheet.querySelector('.body').scrollTop = 0;
+  // 開いた先に焦点を移さないと、キーボード操作では背後のレールに取り残される
+  sheet.focus({ preventScroll: true });
 }
 
 export function closeSheet() {
+  if (!openId) return;
+  const closing = openId;
   openId = null;
   document.body.classList.remove('sheet-open');
   Object.values(SHEETS).forEach((sectionId) => $(sectionId).classList.remove('sheet-active'));
   document.querySelectorAll('[data-sheet]').forEach((el) => el.classList.remove('on'));
+  // 元の位置が拾えないことがある（body に落ちている等）。
+  // その場合は開いていたレール項目へ戻す。焦点が body に落ちると
+  // キーボード操作が先頭からやり直しになる
+  const fallback = document.querySelector(`.rail-btn[data-sheet="${closing}"]`);
+  const target = lastFocus && lastFocus !== document.body && document.contains(lastFocus)
+    ? lastFocus : fallback;
+  target?.focus({ preventScroll: true });
+  lastFocus = null;
+}
+
+/** いま開いているシート名。開いていなければ null。 */
+export function activeSheet() {
+  return openId;
+}
+
+/** HUD の項目を押したときの飛び先を差し替える。値の出どころに合わせるため。 */
+export function routeHud(id, sheetName) {
+  const el = $(id)?.closest('[data-sheet]');
+  if (el) el.dataset.sheet = sheetName;
 }
 
 function toggleSheet(name) {
@@ -96,9 +124,9 @@ export function updateHud(v = {}) {
   if (limitUnit) limitUnit.textContent = v.limitMM != null ? 'mm' : (v.limitPx != null ? 'px' : '');
 
 
-  // 主動作の可否
+  // 主動作は無効化しない。準備状態を見た目に出すだけで、押せば理由を言う
   const run = $('run');
-  if (run) run.disabled = !(v.frames >= 2);
+  if (run) run.dataset.ready = v.frames >= 2 ? '1' : '0';
 }
 
 function setHud(id, text, state) {

@@ -149,6 +149,12 @@
   #vfHint[data-kind="warn"] { border-color: rgba(217,154,43,.55); color: var(--amber); }
   #vfHint[data-kind="bad"]  { border-color: rgba(201,86,78,.55); color: var(--critical); }
 
+  #vfBadge {
+    position: absolute; right: 12px; top: 10px;
+    font-size: 10px; letter-spacing: .06em; color: var(--amber);
+    background: rgba(10,14,12,.82); border: 1px solid var(--amber-dim);
+    padding: 2px 8px; border-radius: 999px;
+  }
   #log {
     position: absolute; left: 12px; top: 10px;
     font-size: 11.5px; color: var(--ink-soft);
@@ -238,7 +244,10 @@
   }
   .shutter:hover:not(:disabled) { background: #e8aa3c; }
   .shutter:active:not(:disabled) { transform: scale(.94); }
-  .shutter:disabled { background: #2a352e; border-color: #3d4a43; color: var(--ink-dim); cursor: not-allowed; }
+  /* 準備できていなくても押せる。押したら理由を言う。
+     無効化して黙っているのが一番たちが悪い */
+  .shutter[data-ready="0"] { background: #2a352e; border-color: #3d4a43; color: var(--ink-dim); }
+  .shutter[data-ready="0"]:hover { background: #35443b; }
   .shutter:focus-visible { outline: 2px solid var(--amber); outline-offset: 4px; }
 
   .mini {
@@ -423,6 +432,7 @@
         点群だけでも面外のはらみ出しは測れます。
       </div>
     </div>
+    <div id="vfBadge" class="hidden">基準画像</div>
     <div id="log"></div>
     <div id="vfHint" class="hidden"></div>
     <div class="progress" id="progress"><i></i></div>
@@ -456,13 +466,13 @@
       <button class="rail-btn" data-sheet="photo" data-ready="idle" id="rail-photo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.6-2.2h4.8L16 6"/></svg><span>写真</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="scale" data-ready="idle" id="rail-scale"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18"/><path d="M6 9v6M10 10.5v3M14 10.5v3M18 9v6"/></svg><span>スケール</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="cloud" data-ready="idle" id="rail-cloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16l5-6 4 4 3-3 4 5z"/><circle cx="8" cy="6.5" r="1.4"/><circle cx="14" cy="5.5" r="1.1"/><circle cx="19" cy="8" r="1.1"/></svg><span>点群</span><span class="dot"></span></button>
-      <button class="rail-btn" data-sheet="analyze" data-ready="idle" id="rail-analyze"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M7.5 7.5h9v9h-9z" stroke-dasharray="2 2"/></svg><span>範囲</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="analyze" data-ready="idle" id="rail-analyze"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M7.5 7.5h9v9h-9z" stroke-dasharray="2 2"/></svg><span>方式</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="result" data-ready="idle" id="rail-result"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg><span>結果</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="history" data-ready="idle" id="rail-history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18l5-7 4 3 4-7 5 5"/><path d="M3 21h18"/></svg><span>経時</span><span class="dot"></span></button>
     </div>
     <div class="shutter-wrap">
       <button class="mini" id="cameraBtn" title="その場で撮影" aria-label="その場で撮影"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.6-2.2h4.8L16 6"/></svg></button>
-      <button class="shutter" id="run" disabled title="σ を実測する" aria-label="σ を実測する">σ</button>
+      <button class="shutter" id="run" data-ready="0" title="σ を実測する" aria-label="σ を実測する">σ</button>
     </div>
   </div>
 
@@ -470,7 +480,7 @@
 
 <div id="sheetBackdrop"></div>
 
-  <section class="sheet" id="step1">
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="step1">
     <header><h2>写真</h2><span class="sheet-note" id="note1">2枚以上</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <div class="btn-row">
@@ -491,7 +501,7 @@
       <div id="quickCheck"></div>
     </div>
   </section>
-  <section class="sheet" id="step2">
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="step2">
     <header><h2>スケール</h2><span class="sheet-note" id="note2">mm換算に必要</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <div class="row">
@@ -528,7 +538,7 @@
       <p class="note">未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
     </div>
   </section>
-  <section class="sheet" id="stepCloud">
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="stepCloud">
     <header><h2>点群</h2><span class="sheet-note">任意・写真が無くても使えます</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <p class="note" style="margin-top:0">
@@ -578,11 +588,19 @@
       </div>
     </div>
   </section>
-  <section class="sheet" id="step3">
-    <header><h2>解析範囲と実行</h2><span class="sheet-note" id="note3"></span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="step3">
+    <header><h2>解析方式</h2><span class="sheet-note" id="note3"></span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <div id="preview"><div id="roiBox"></div></div>
-      <p class="note">ドラッグで範囲を選択。未選択なら中央60%を使います。</p>
+      <div class="banner warn"><div>
+        <b>解析範囲はビューファインダー上でドラッグして選びます</b><br>
+        このシートの外側をタップすると閉じて、枠をドラッグできるようになります。
+        下のボタンなら選ばずに決められます。
+      </div></div>
+      <div class="btn-row" style="margin-bottom:14px">
+        <button id="roiCenter">中央 60% に戻す</button>
+        <button id="roiFull">画像全体を使う</button>
+      </div>
 
       <div class="row" style="margin-top:14px">
         <div>
@@ -625,10 +643,11 @@
       </details>
 <button class="primary wide" id="run" disabled>σ を実測する</button>
       <div class="progress" id="progress"><i></i></div>
-      <div id="log"></div>
+      <div id="vfBadge" class="hidden">基準画像</div>
+    <div id="log"></div>
     </div>
   </section>
-  <section class="sheet" id="results">
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="results">
     <header><h2>結果</h2><button id="exportBtn" style="padding:6px 12px;font-size:12.5px">書き出す</button><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <div class="verdict" id="verdict"></div>
@@ -642,7 +661,7 @@
       <p class="note" id="fieldNote"></p>
     </div>
   </section>
-  <section class="sheet" id="stepHistory">
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="stepHistory">
     <header><h2>経時管理</h2><span class="sheet-note">前回と比べる</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <p class="note" style="margin-top:0">

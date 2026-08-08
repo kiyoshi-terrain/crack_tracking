@@ -14,7 +14,7 @@ import { speckleQuality, focusScore } from './speckle.js';
 import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
-import { initShell, updateHud, setViewfinderHint, openSheet } from './shell.js';
+import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -173,18 +173,40 @@ function renderQuickCheck() {
     </span>
   </div></div>`;
 
-  // 撮り直しが効くうちに気づかせたいので、シートを開かなくても見える所に出す。
-  // 良好なときは何も出さない（常時何か言っていると読まれなくなる）
-  const focus = focusLamp(latest);
-  if (cls === 'bad') {
-    setViewfinderHint(`模様が乏しく DIC が成立しません — ${latest.quality.reason}`, 'bad');
-  } else if (focus === 'bad') {
-    setViewfinderHint('この枚はピントが外れています。撮り直してください', 'bad');
-  } else if (cls === 'warn' || focus === 'warn') {
-    setViewfinderHint(latest.quality.reason, 'warn');
-  } else {
-    setViewfinderHint(null);
+}
+
+/**
+ * ビューファインダーに出す一言。
+ *
+ * 優先順は「撮り直すべき」＞「次にやること」。良好かつ何も足りなければ黙る。
+ * 常時何か言っていると読まれなくなるので、出す条件は絞る。
+ */
+function showHint() {
+  const worst = pickWorstPhoto();
+  if (worst && worst.lamp !== 'good') {
+    const where = worst.index === 0 ? '基準画像' : `${worst.index} 枚目`;
+    if (verdictToLamp(worst.file.quality.verdict) === 'bad') {
+      setViewfinderHint(`${where}: 模様が乏しく DIC が成立しません — ${worst.file.quality.reason}`, 'bad');
+    } else if (focusLamp(worst.file) === 'bad') {
+      setViewfinderHint(`${where}: ピントが外れています。撮り直してください`, 'bad');
+    } else {
+      setViewfinderHint(`${where}: ${worst.file.quality.reason}`, 'warn');
+    }
+    return;
   }
+
+  const next = nextAction();
+  setViewfinderHint(next, next ? 'info' : 'info');
+}
+
+/** 次にやること。全部そろっていれば null。 */
+function nextAction() {
+  const n = state.files.length;
+  if (n === 0) return null;                       // 空状態の案内は vf-empty が出している
+  if (n === 1) return 'あと1枚以上撮ると σ が出ます';
+  if (state.measurement) return null;
+  if (currentGSD() == null) return 'スケールを決めると mm で出ます（未入力でも px では出ます）';
+  return 'σ を押すと実測します';
 }
 
 // ═══════════════════════════════════════════ ステップ状態
@@ -219,8 +241,13 @@ function updateSteps() {
     limitPx: state.limit?.px ?? null,
   });
 
+  // 距離は点群からも手入力からも来る。押したときに値の出どころへ飛ばす
+  routeHud('hudDistance', cloudState.plane ? 'cloud' : 'scale');
+
   $('vfEmpty').classList.toggle('hidden', n > 0);
+  $('vfBadge').classList.toggle('hidden', n === 0);
   updateScopes();
+  showHint();
 }
 
 function setNote(id, text) {
@@ -270,13 +297,19 @@ function historyLamp() {
  * ここに出るのは「撮り直すべきか」「有意か」だけに絞る。
  */
 function updateScopes() {
-  const latest = state.files[state.files.length - 1];
+  // 最後の1枚ではなく**一番悪い1枚**を出す。
+  // 1枚でもピントが外れていればセッション全体の σ が悪化するので、
+  // 平均や最新では見逃す
+  const worstPhoto = pickWorstPhoto();
 
-  if (latest) {
+  if (worstPhoto) {
+    const { file, index, lamp } = worstPhoto;
     // MIG は 0.02 も出れば十分。そこを満点として目盛る
-    setBar('barTexture', latest.quality.mig / 0.02, verdictToLamp(latest.quality.verdict));
-    setBar('barFocus', latest.focus / 0.35, focusLamp(latest));
-    $('scopeQualityNote').textContent = latest.quality.reason;
+    setBar('barTexture', file.quality.mig / 0.02, verdictToLamp(file.quality.verdict));
+    setBar('barFocus', file.focus / 0.35, focusLamp(file));
+    $('scopeQualityNote').textContent = lamp === 'good'
+      ? `${state.files.length} 枚とも良好`
+      : `${index === 0 ? '基準' : `${index} 枚目`}が最も悪い — ${file.quality.reason}`;
   } else {
     setBar('barTexture', 0, null);
     setBar('barFocus', 0, null);
@@ -296,6 +329,18 @@ function updateScopes() {
     ? `${h.deltaMM > 0 ? '+' : ''}${h.deltaMM.toFixed(4)}`
     : '—';
   $('scopeDeltaNote').textContent = h.note;
+}
+
+/** セッション中で最も悪い1枚。良否は「模様」と「ピント」の悪い方で決める。 */
+function pickWorstPhoto() {
+  if (!state.files.length) return null;
+  const rank = { bad: 3, warn: 2, good: 1 };
+  let best = null;
+  state.files.forEach((file, index) => {
+    const lamp = worse(verdictToLamp(file.quality.verdict), focusLamp(file));
+    if (!best || (rank[lamp] ?? 0) > (rank[best.lamp] ?? 0)) best = { file, index, lamp };
+  });
+  return best;
 }
 
 function setBar(id, fraction, lamp) {
@@ -429,6 +474,27 @@ function setupPreview() {
   preview.canvas.addEventListener('pointerup', () => { dragStart = null; updateSteps(); });
 }
 
+$('roiCenter').addEventListener('click', () => {
+  if (!state.files.length) return;
+  const { imageData } = state.files[0];
+  const side = Math.round(Math.min(imageData.width, imageData.height) * 0.6);
+  setRoi({
+    x: Math.round((imageData.width - side) / 2),
+    y: Math.round((imageData.height - side) / 2),
+    width: side, height: side,
+  });
+  closeSheet();
+  updateSteps();
+});
+
+$('roiFull').addEventListener('click', () => {
+  if (!state.files.length) return;
+  const { imageData } = state.files[0];
+  setRoi({ x: 0, y: 0, width: imageData.width, height: imageData.height });
+  closeSheet();
+  updateSteps();
+});
+
 function setRoi(roi) {
   const { imageData } = state.files[0];
   const clamped = clampRegion(roi, imageData.width, imageData.height);
@@ -447,7 +513,34 @@ function setRoi(roi) {
 
 // ═══════════════════════════════════════════ 解析
 
+/**
+ * σ が出せない理由。出せるなら null。
+ *
+ * ボタンを無効化して黙っているのが一番たちが悪いので、
+ * 押されたら理由を言って、直せる場所まで連れて行く。
+ */
+function runBlockReason() {
+  const n = state.files.length;
+  if (n === 0) {
+    return { reason: '写真がありません。◉ で撮るか、写真シートから読み込んでください', sheet: 'photo' };
+  }
+  if (n === 1) {
+    return {
+      reason: 'σ は「動いていないはずのものが動いて見える量」なので、2枚以上必要です',
+      sheet: 'photo',
+    };
+  }
+  return null;
+}
+
 $('run').addEventListener('click', async () => {
+  const block = runBlockReason();
+  if (block) {
+    setViewfinderHint(block.reason, 'warn');
+    openSheet(block.sheet);
+    return;
+  }
+  closeSheet();
   $('run').disabled = true;
   $('progress').classList.add('on');
   try {
