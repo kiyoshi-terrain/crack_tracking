@@ -37,6 +37,19 @@
   nav a { display:block; padding:5px 10px; color:var(--ink-soft); text-decoration:none; border-radius:6px; border-left:2px solid transparent; }
   nav a:hover { background:var(--panel); color:var(--ink); }
   nav ol ol a { padding-left:22px; font-size:12.5px; color:var(--ink-dim); }
+  /* 広い画面では常に開いたまま。目次の開閉ボタンは要らない */
+  nav summary { display:none; }
+  @media (max-width:860px){
+    nav summary {
+      display:block; cursor:pointer; list-style:none;
+      padding:9px 12px; margin:10px 0; border:1px solid var(--line);
+      background:var(--panel); border-radius:8px; color:var(--ink-soft); font-size:13.5px;
+    }
+    nav summary::-webkit-details-marker { display:none; }
+    nav summary::before { content:"▸ "; }
+    nav details[open] summary::before { content:"▾ "; }
+    nav ol { margin-bottom:14px; }
+  }
 
   main { min-width:0; }
   section { margin-bottom:46px; scroll-margin-top:18px; }
@@ -103,6 +116,8 @@
 
 <div class="wrap">
 <nav>
+  <details id="toc" open>
+  <summary>目次</summary>
   <ol>
     <li><a href="#about">1. このツールは何か</a></li>
     <li><a href="#screen">2. 画面の見方</a></li>
@@ -124,6 +139,7 @@
     <li><a href="#trouble">8. 困ったとき</a></li>
     <li><a href="#basis">9. 検証の根拠</a></li>
   </ol>
+  </details>
 </nav>
 
 <main>
@@ -666,5 +682,20 @@
   この文書はブラウザの印刷機能でそのまま紙に出せます。
 </footer>
 
+<script>
+  // 目次は広い画面では開いたまま、狭い画面では畳んでおく。
+  // スマホで16項目の目次が1画面ぶん占めると、本文にたどり着く前に閉じられる
+  (function () {
+    var toc = document.getElementById('toc');
+    var narrow = window.matchMedia('(max-width: 860px)');
+    var apply = function (m) { toc.open = !m.matches; };
+    apply(narrow);
+    narrow.addEventListener('change', apply);
+    // 項目を選んだら畳む（狭い画面のみ）
+    toc.addEventListener('click', function (e) {
+      if (narrow.matches && e.target.closest('a')) toc.open = false;
+    });
+  }());
+</script>
 </body>
 </html>
