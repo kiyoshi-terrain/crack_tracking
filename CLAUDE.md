@@ -49,6 +49,7 @@
 web/
   index.html          σ実測ツール本体（カメラ風UI・スクロールしない）
   targets/index.html  模擬き裂ターゲットシート（A4原寸印刷）
+  manual/index.html   取扱説明書（現地用・オフライン・印刷可）
   src/
     dic.js            ZNCC探索 → 逆合成Gauss-Newton
     targets.js        円形ターゲットの検出と輝度加重重心

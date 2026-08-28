@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>σ実測ツール 取扱説明書</title>
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0b0f0d">
+<style>
+  :root {
+    --ground:#0b0f0d; --panel:#161d19; --panel-2:#1c2620; --line:#253028;
+    --ink:#e6ece8; --ink-soft:#94a69c; --ink-dim:#67766d;
+    --amber:#d99a2b; --amber-dim:#8a6420; --forest:#4a9d72; --critical:#c9564e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+    line-height:1.85; font-size:15.5px;
+  }
+  .mono,code,td.num,th.num { font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-variant-numeric:tabular-nums; }
+  code { background:#0c110e; border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.9em; }
+
+  .wrap { max-width:1140px; margin:0 auto; display:grid; grid-template-columns:246px minmax(0,1fr); gap:34px; padding:0 20px 90px; }
+  @media (max-width:860px){ .wrap{ grid-template-columns:minmax(0,1fr); gap:0; } nav{ position:static !important; max-height:none !important; margin-bottom:8px; } }
+
+  header.top { border-bottom:1px solid var(--line); background:linear-gradient(180deg,#131a16,var(--ground)); padding:26px 20px 20px; margin-bottom:30px; }
+  header.top .inner { max-width:1140px; margin:0 auto; }
+  header.top h1 { margin:0; font-size:23px; letter-spacing:.01em; }
+  header.top p { margin:7px 0 0; color:var(--ink-soft); font-size:13.5px; max-width:70ch; }
+  header.top .meta { margin-top:12px; font-size:12px; color:var(--ink-dim); }
+  header.top a { color:var(--amber); }
+
+  nav { position:sticky; top:16px; align-self:start; max-height:calc(100vh - 32px); overflow-y:auto; font-size:13px; }
+  nav ol { list-style:none; margin:0; padding:0; }
+  nav > ol > li { margin-bottom:3px; }
+  nav a { display:block; padding:5px 10px; color:var(--ink-soft); text-decoration:none; border-radius:6px; border-left:2px solid transparent; }
+  nav a:hover { background:var(--panel); color:var(--ink); }
+  nav ol ol a { padding-left:22px; font-size:12.5px; color:var(--ink-dim); }
+
+  main { min-width:0; }
+  section { margin-bottom:46px; scroll-margin-top:18px; }
+  h2 { font-size:20px; margin:0 0 4px; padding-bottom:9px; border-bottom:1px solid var(--line); }
+  h2 .n { color:var(--amber); font-family:SFMono-Regular,Menlo,monospace; margin-right:9px; font-size:16px; }
+  h3 { font-size:15.5px; margin:30px 0 6px; color:var(--ink); }
+  h4 { font-size:14px; margin:20px 0 4px; color:var(--ink-soft); font-weight:600; }
+  p { margin:9px 0; }
+  ul,ol.body { padding-left:1.35em; margin:9px 0; }
+  li { margin:4px 0; }
+  strong,b { color:#fff; }
+
+  .lead { color:var(--ink-soft); font-size:14px; margin-top:10px; }
+  .box { border:1px solid var(--line); background:var(--panel); border-radius:9px; padding:13px 16px; margin:15px 0; }
+  .box.key { border-color:var(--amber-dim); background:rgba(217,154,43,.07); }
+  .box.warn { border-color:rgba(217,154,43,.42); background:rgba(217,154,43,.08); }
+  .box.bad { border-color:rgba(201,86,78,.42); background:rgba(201,86,78,.08); }
+  .box .t { font-weight:700; display:block; margin-bottom:3px; }
+  .box.key .t { color:var(--amber); }
+  .box.bad .t { color:var(--critical); }
+
+  table { width:100%; border-collapse:collapse; font-size:13.5px; margin:14px 0; display:block; overflow-x:auto; }
+  th,td { text-align:left; padding:8px 11px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--ink-soft); font-weight:600; font-size:12.5px; white-space:nowrap; }
+  td.num,th.num { text-align:right; font-family:SFMono-Regular,Menlo,monospace; }
+
+  pre { background:#0a0e0c; border:1px solid var(--line); border-radius:8px; padding:14px 16px; overflow-x:auto;
+        font-family:SFMono-Regular,Menlo,monospace; font-size:12.5px; line-height:1.62; color:var(--ink-soft); }
+  pre b { color:var(--amber); font-weight:600; }
+
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; vertical-align:baseline; margin-right:2px; }
+  .dot.g{background:var(--forest)} .dot.a{background:var(--amber)} .dot.r{background:var(--critical)} .dot.d{background:#2a352e}
+
+  .chip { display:inline-block; font-size:11.5px; font-family:SFMono-Regular,Menlo,monospace;
+          border:1px solid var(--line); background:var(--panel-2); border-radius:5px; padding:1px 7px; color:var(--ink-soft); }
+  a { color:var(--amber); }
+  hr { border:0; border-top:1px solid var(--line); margin:34px 0; }
+  footer { max-width:1140px; margin:0 auto; padding:22px 20px 60px; color:var(--ink-dim); font-size:12.5px; border-top:1px solid var(--line); }
+
+  @media print {
+    body { background:#fff; color:#000; font-size:10.5pt; }
+    nav, header.top .meta { display:none; }
+    .wrap { grid-template-columns:1fr; padding:0; }
+    .box,pre,table,th,td { border-color:#bbb; background:#fff; }
+    strong,b,h1,h2,h3 { color:#000; }
+    section { page-break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="inner">
+    <h1>σ実測ツール 取扱説明書</h1>
+    <p>き裂の追跡測定で「その機材・その現場で何 mm の変化まで検出できるか」を実測し、
+       測点として登録して経時変化を追うためのツールです。</p>
+    <div class="meta">
+      対象バージョン: 経時管理・点群対応版（カメラ風UI） ·
+      <a href="../">ツールを開く</a> ·
+      <a href="../targets/">模擬ターゲットシート</a>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<nav>
+  <ol>
+    <li><a href="#about">1. このツールは何か</a></li>
+    <li><a href="#screen">2. 画面の見方</a></li>
+    <li><a href="#quick">3. 現地での手順</a></li>
+    <li><a href="#shoot">4. 撮影プロトコル</a></li>
+    <li><a href="#features">5. 機能ごとの詳細</a>
+      <ol>
+        <li><a href="#f-photo">5.1 写真</a></li>
+        <li><a href="#f-scale">5.2 スケール</a></li>
+        <li><a href="#f-cloud">5.3 点群</a></li>
+        <li><a href="#f-method">5.4 方式</a></li>
+        <li><a href="#f-result">5.5 結果</a></li>
+        <li><a href="#f-history">5.6 経時管理</a></li>
+        <li><a href="#f-target">5.7 ターゲットシート</a></li>
+      </ol>
+    </li>
+    <li><a href="#numbers">6. 数値の読み方</a></li>
+    <li><a href="#limits">7. 精度と限界</a></li>
+    <li><a href="#trouble">8. 困ったとき</a></li>
+    <li><a href="#basis">9. 検証の根拠</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ══════════════════════════════════════ -->
+<section id="about">
+<h2><span class="n">1</span>このツールは何か</h2>
+
+<p>構造物は数分では動きません。だから同じ場所から連続で撮った複数枚に対して変位を計算すると、
+<b>出るはずのない値</b>が出ます。それがそのまま測定ノイズ σ です。</p>
+
+<div class="box key">
+  <span class="t">順序が逆です</span>
+  目標精度を先に決めるのではなく、<b>現物の σ を測ってから「何 mm の変化なら有意と言えるか」を決めます。</b>
+  カタログ値ではなく、その日その機材その立ち位置での実力値です。
+</div>
+
+<h3>できること</h3>
+<table>
+<tr><th>量</th><th>手段</th><th class="num">精度の目安</th></tr>
+<tr><td>き裂の開きの<b>変化</b>（面内）</td><td>写真・DIC / ターゲット</td><td class="num">σ 次第。合成では 0.005 px</td></tr>
+<tr><td>面外の<b>はらみ出し</b></td><td>点群（LiDAR）</td><td class="num">5〜15 mm</td></tr>
+<tr><td>撮影距離・面の傾き</td><td>点群 または 手入力</td><td class="num">—</td></tr>
+<tr><td>経年の進行と温度の分離</td><td>測点の履歴から重回帰</td><td class="num">—</td></tr>
+</table>
+
+<h3>できないこと</h3>
+<ul>
+  <li><b>き裂幅の絶対値</b>を遠方から測ること。幅を測るには芯線に 3 px 前後が必要で、
+      変化の検出（サブピクセル）とは要求分解能が 2 桁違います</li>
+  <li>点群で面内を測ること。写真より 2 桁粗いので、重ねると精度の低い方に引きずられます</li>
+  <li>写真だけで面外を測ること。1 組の写真からは原理的に出ません</li>
+</ul>
+
+<div class="box">
+  画像はブラウザの外に出ません。サーバー処理も通信もありません。
+  一度開けばサービスワーカーが本体をキャッシュするので、<b>圏外の現場でも動きます</b>。
+  iPhone なら「ホーム画面に追加」しておくとアプリのように起動できます。
+</div>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="screen">
+<h2><span class="n">2</span>画面の見方</h2>
+
+<p>カメラアプリの構成です。<b>スクロールしません。</b>
+判断に要る数値は常に画面にあり、詳細だけがシートとして手前に出ます。</p>
+
+<pre>┌──────────────────────────────────┬────┐
+│ <b>枚数 mm/px 距離 斜角 検出限界</b>       │写真│ ← 押すと該当シート
+│ ┌──────────────────────────────┐ │スケール│
+│ │                              │ │点群│ ← 各項目にドット
+│ │   <b>ビューファインダー</b>            │ │方式│
+│ │   三分割線・ドラッグで範囲選択 │ │結果│
+│ │                              │ │経時│
+│ └──────────────────────────────┘ │ ◉  │ ← その場で撮影
+│ 撮影品質 │ <b>検出限界 3σ</b> │ 前回との差  │ <b>σ</b>  │ ← 実測する
+└──────────────────────────────────┴────┘</pre>
+
+<p>縦持ちではレールが下に回ります。<b>σ ボタンは親指の届く位置に固定</b>です。</p>
+
+<h3>上段 HUD</h3>
+<table>
+<tr><th>項目</th><th>意味</th><th>押すと</th></tr>
+<tr><td>枚数</td><td>読み込んでいる写真の数</td><td>写真シート</td></tr>
+<tr><td>MM/PX</td><td>分解能（1 画素が実寸で何 mm か）</td><td>スケールシート</td></tr>
+<tr><td>距離</td><td>面までの距離</td><td><b>値の出どころ</b>（点群があれば点群、なければスケール）</td></tr>
+<tr><td>斜角</td><td>面の法線と視線のなす角。30°超で橙</td><td>点群シート</td></tr>
+<tr><td>検出限界</td><td>3σ。これを下回る変化は有意と言えません</td><td>結果シート</td></tr>
+</table>
+
+<h3>レールのドット</h3>
+<p>「使えるか」ではなく<b>「良いか」</b>を出します。
+<b>未評価と良好を同じ見た目にしていません。</b>「測っていない」と「問題なし」は違うからです。</p>
+<ul>
+  <li><span class="dot d"></span> 灰 — 未評価（まだ測っていない）</li>
+  <li><span class="dot g"></span> 緑 — 良好</li>
+  <li><span class="dot a"></span> 橙 — 注意</li>
+  <li><span class="dot r"></span> 赤 — 不可</li>
+</ul>
+
+<h3>下段スコープ</h3>
+<table>
+<tr><th>枠</th><th>出るもの</th></tr>
+<tr><td>撮影品質</td><td>模様とピントのバー。<b>最新ではなく「一番悪い1枚」</b>を枚数付きで名指しします。1枚でもピントが外れていればセッション全体の σ が悪化するためです</td></tr>
+<tr><td>検出限界 3σ</td><td>最後に実測した値と、その根拠（枚数・方式）</td></tr>
+<tr><td>前回との差</td><td>選択中の測点の直近2回の差。<b>温度補正後</b>の値です</td></tr>
+</table>
+
+<h3>ビューファインダーの一言</h3>
+<p>出る条件を絞っています。優先順は<b>「撮り直すべき」＞「次にやること」</b>。
+問題も不足も無ければ黙ります（常時何か言っていると読まれなくなるため）。</p>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="quick">
+<h2><span class="n">3</span>現地での手順</h2>
+
+<ol class="body">
+  <li><b>写真を読み込む</b> — <span class="chip">◉</span> で撮るか、写真シートからドロップ／選択。
+      1枚読み込んだ時点で模様・ピント・分解能を判定します（撮り直しが効くうちに気づくため）</li>
+  <li><b>スケールを決める</b> — 次節の3通りのどれか。採用したものは画面に表示されます</li>
+  <li><b>解析範囲を選ぶ</b> — ビューファインダー上でドラッグ。未選択なら短辺 60% の正方形を使います</li>
+  <li><b>σ を押す</b> — 実測が終わると結果シートが自動で開きます</li>
+  <li><b>測点として記録する</b> — 経時シートで測点を選び「この測点の観測として記録」。
+      <b>気温を必ず入れてください</b></li>
+</ol>
+
+<div class="box warn">
+  <span class="t">σ ボタンは常に押せます</span>
+  条件が足りなければ理由を出して、直せるシートまで開きます。
+  灰色のまま反応しないことはありません。
+</div>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="shoot">
+<h2><span class="n">4</span>撮影プロトコル</h2>
+
+<h3>枚数を稼ぐなら連写</h3>
+<p><b>iPhone の Camera アプリでシャッターを長押し</b>（またはボリューム下を長押し）すると 10 fps のバーストになります。
+2 秒で 20 枚撮れるので、その間の気温変化も日射変化もほぼゼロ。撮った後にライブラリから全選択してツールに渡してください。</p>
+<p>アプリ内の <span class="chip">◉</span> は 1 タップ 1 枚なので、現地チェック用と割り切っています。</p>
+
+<h3>守ること</h3>
+<ol class="body">
+  <li><b>ズーム倍率を固定し、撮影中に一切触らない。</b>
+      焦点距離が変わるとスケールが変わり、追跡測定が静かに壊れます。
+      EXIF を照合して不一致を警告します</li>
+  <li>AE / AF ロック</li>
+  <li><b>JPEG 推奨</b>（設定 &gt; カメラ &gt; フォーマット &gt; 互換性優先）。
+      Chrome は HEIC を読めません。Safari なら HEIC でも通ります</li>
+  <li>曇天か日陰の時間帯。影のコントラストが変わると相関が落ちます</li>
+  <li><b>気温・天候・時刻を記録。</b>温度による見かけの開閉を後で分離するために必須です</li>
+  <li>点群も撮るなら、<b>スキャンを開始した位置から写真を撮る</b>（5.3 参照）</li>
+</ol>
+
+<div class="box key">
+  <span class="t">季節を変えて撮ってください</span>
+  温度分離には気温の幅が要ります。同じ季節にしか行っていないと係数が出せず、
+  「この傾きには温度が混ざっている可能性がある」としか言えません。
+</div>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="features">
+<h2><span class="n">5</span>機能ごとの詳細</h2>
+
+<h3 id="f-photo">5.1 写真</h3>
+<p>写真は<b>追加していけます</b>。カメラは 1 回 1 枚しか返さないので、撮るたびに積み上がります。
+1 枚目が基準画像になり、ビューファインダーには「基準画像」バッジが出ます。</p>
+
+<h4>模様の判定（MIG）</h4>
+<p>DIC が成立する模様があるかを、平均輝度勾配（MIG）とコントラストで判定します。</p>
+<table>
+<tr><th>判定</th><th>条件</th><th>意味</th></tr>
+<tr><td><span class="dot r"></span> poor</td><td class="num">MIG &lt; 0.004 または コントラスト &lt; 0.01</td><td>DIC では追えません。ターゲット方式へ</td></tr>
+<tr><td><span class="dot a"></span> fair</td><td class="num">MIG &lt; 0.012 または コントラスト &lt; 0.03</td><td>精度が落ちます。寄るか斜光で陰影を出す</td></tr>
+<tr><td><span class="dot g"></span> good</td><td class="num">上記以外</td><td>十分な模様があります</td></tr>
+</table>
+<p>白飛び・黒つぶれが 10% を超えると good → fair に落とし、露出の見直しを促します。</p>
+
+<h4>ピントの判定</h4>
+<p>ピントの絶対値はレンズと被写体で変わるため、<b>セッション内の中央値との比</b>で判定します。
+中央値の 60% 未満で赤、85% 未満で橙。「模様が無い」と「ピンボケ」は別の指標として分けています。</p>
+
+<h4>EXIF の照合</h4>
+<p>焦点距離・機種・画像サイズが枚ごとに揃っているかを確認し、揃っていなければ警告します。
+ズームが混ざるとスケールが変わり、追跡測定が壊れるためです。</p>
+
+<hr>
+
+<h3 id="f-scale">5.2 スケール</h3>
+<p>mm 換算のためだけに必要です。未入力でも σ は px 単位で出ます。
+決め方は 3 通りあり、<b>この優先順で自動的に採用され、採用したものが画面に表示されます</b>。</p>
+
+<table>
+<tr><th class="num">優先</th><th>方法</th><th>要るもの</th><th>特徴</th></tr>
+<tr><td class="num">1</td><td><b>既知の基準距離</b></td><td>ターゲット対の実距離（ノギス実測）</td><td>最も確か。距離計も焦点距離も不要。印刷倍率の誤差も吸収</td></tr>
+<tr><td class="num">2</td><td><b>点群</b></td><td>PLY / LAS</td><td><b>斜め補正が入る</b>。距離計も焦点距離も不要</td></tr>
+<tr><td class="num">3</td><td>撮影距離 × 焦点距離</td><td>レーザー距離計の実測値、EXIF</td><td>手軽だが斜角を無視する</td></tr>
+</table>
+
+<div class="box warn">
+  <span class="t">斜めに構えると系統的に過小評価します</span>
+  mm/px は 1/cosθ で伸びます。距離と焦点距離だけで計算すると、この分だけ小さく出ます。
+  <table style="margin:8px 0 0">
+    <tr><th>斜角</th><th class="num">誤差</th></tr>
+    <tr><td>20°</td><td class="num">6.4% 過小</td></tr>
+    <tr><td>30°</td><td class="num">15.4% 過小</td></tr>
+    <tr><td>45°</td><td class="num">41.3% 過小</td></tr>
+  </table>
+  点群を使えばこの補正は自動で入ります。
+</div>
+
+<hr>
+
+<h3 id="f-cloud">5.3 点群</h3>
+<p><b>写真が無くても使えます。</b>Scaniverse などで撮った点群を読み込みます。</p>
+
+<p>点群の役割は 2 つだけです。面内（き裂の開き）は一切やりません。写真が 2 桁上だからです。</p>
+<ol class="body">
+  <li><b>スケールを渡す</b> — 面までの距離と斜角が決まる（5.2 参照）</li>
+  <li><b>面外を測る</b> — 石材が手前にはらみ出していないか。<b>写真には原理的に出ない量</b>で、
+      剥落の前兆はここに出ます</li>
+</ol>
+
+<h4>読める形式</h4>
+<table>
+<tr><th>形式</th><th>対応</th></tr>
+<tr><td>PLY（ascii / binary_little_endian / binary_big_endian）</td><td>可。法線や色が混ざっていても x,y,z を拾います</td></tr>
+<tr><td>LAS 1.2 〜 1.4（point format 0〜10）</td><td>可</td></tr>
+<tr><td>LAZ（圧縮 LAS）</td><td><b>不可</b>。LAS か PLY で書き出してください</td></tr>
+</table>
+<p>25 万点を超える場合は等間隔で間引きます（乱数を使わないので、同じ点群からは必ず同じ結果になります）。</p>
+
+<h4>撮影手順</h4>
+<div class="box key">
+  <span class="t">スキャンを開始した位置から写真を撮ってください</span>
+  点群の原点＝スキャン開始地点なので、これで視点が決まります。点群と写真の厳密な位置合わせはしません。<br>
+  立ち位置が 10 m に対して 0.3 m ずれた場合のスケール誤差は 3%。
+  <b>追跡計測（変化量）では変化量の 3% にしか効かない</b>ので（0.10 mm の開きに対して 0.003 mm）実質無視できます。
+  絶対幅を出すときだけ 3% が効きます。
+</div>
+
+<h4>設定</h4>
+<table>
+<tr><th>項目</th><th>意味</th></tr>
+<tr><td>上方向の軸</td><td>PLY は Y、LAS は Z が既定。<b>面外マップの向きにだけ効き、測定値は変わりません</b></td></tr>
+<tr><td>セルの一辺</td><td>既定 50 mm。大谷石は 1 個 300〜900 mm 程度なので、その 1/6 前後</td></tr>
+</table>
+
+<h4>面外マップの読み方</h4>
+<p>平面からの残差をセルに集約した図です。セルの代表値は<b>中央値</b>なので、
+手前の草を一掴みしても面が残ります。</p>
+<ul>
+  <li><b>検出限界は「その点群自身の面の粗さ（RMS）の 3 倍」</b>。σ 実測と同じ考え方で、
+      何 mm なら本物と言えるかを点群自身に決めさせています</li>
+  <li><b>配色は検出限界を境に切り替わります。</b>限界以下は淡く潰してあります。
+      ノイズの分布に色域を合わせると、測れていないばらつきが全面フルカラーになり、
+      本物と同じ強さで描かれてしまうためです</li>
+  <li>白枠で囲まれたまとまりが、検出したはらみ出しです（3 セル以上の連結成分のみ）</li>
+</ul>
+
+<h4>要約に出る値</h4>
+<table>
+<tr><th>項目</th><th>意味・注意</th></tr>
+<tr><td>面の粗さ</td><td>平面からの残差 RMS。検出限界はこの 3 倍</td></tr>
+<tr><td>採用点</td><td>外れ値（植生など）を除いた割合。<b>60% を切ると警告</b>します</td></tr>
+<tr><td>異方性</td><td>縦横の mm/px の比。斜めに構えると 1 から離れます</td></tr>
+<tr><td>画面内の変動</td><td>端と中央の mm/px の比。<b>1.3 倍を超えると警告</b>。き裂は画面中央付近に入れてください</td></tr>
+</table>
+
+<hr>
+
+<h3 id="f-method">5.4 方式</h3>
+<p>解析範囲はこのシートではなく<b>ビューファインダー上でドラッグ</b>して選びます
+（シートの外側をタップすると閉じて、枠をドラッグできます）。
+「中央 60%」「画像全体」のボタンなら選ばずに決められます。</p>
+
+<h4>解析方式</h4>
+<table>
+<tr><th>方式</th><th>使いどころ</th></tr>
+<tr><td>DIC（自然模様）</td><td>石材の肌など、模様がある面。ターゲットの設置が不要</td></tr>
+<tr><td>ターゲット（円形マーカー）</td><td>模様が乏しい面。輝度加重重心で 1/300 px</td></tr>
+<tr><td>両方 — 併走して比較</td><td>両者の食い違いから<b>ターゲットが浮いていないか</b>を確認できます（接着不良の検出）</td></tr>
+</table>
+
+<h4>変換モデル</h4>
+<table>
+<tr><th>モデル</th><th>使いどころ</th></tr>
+<tr><td>アフィン</td><td>三脚＋連写。並進・回転・スケール・せん断</td></tr>
+<tr><td>ホモグラフィ</td><td>手持ちや別日撮影。平面を仮定した射影変換</td></tr>
+</table>
+
+<h4>詳細設定</h4>
+<table>
+<tr><th>項目</th><th class="num">既定</th><th>意味</th></tr>
+<tr><td>サブセット半径</td><td class="num">15 px</td><td>大きいほど精度が上がり分解能が下がります。31 px 角が標準的な出発点</td></tr>
+<tr><td>測点間隔</td><td class="num">25 px</td><td>小さいほど測点が増え、時間がかかります</td></tr>
+<tr><td>解析チャンネル</td><td class="num">輝度</td><td>「緑のみ」はデモザイクの影響が最小</td></tr>
+</table>
+<p>画素値は<b>線形光</b>に戻してから扱っています。画素の半分がき裂に覆われたとき、
+線形光なら値が背景と亀裂のちょうど中間になります。ガンマ符号化のままだと幅が系統的にずれます。</p>
+
+<hr>
+
+<h3 id="f-result">5.5 結果</h3>
+<table>
+<tr><th>表示</th><th>意味</th></tr>
+<tr><td>検出限界 3σ</td><td>き裂を挟む 2 点の相対変位として検出できる下限</td></tr>
+<tr><td>σ（1測点・1枚）</td><td>1 測点・1 枚あたりの測定ノイズ</td></tr>
+<tr><td>σ（N枚平均）</td><td>N 枚平均すると σ は √N で下がります</td></tr>
+<tr><td>各方式の σ</td><td>DIC とターゲットの両方を走らせた場合、<b>精度の良い方が代表値</b>になります</td></tr>
+<tr><td>残差ベクトル図</td><td><b>方向がランダムならノイズ。</b>揃っていたり渦を巻いていたら、変換モデルで取り切れていない歪み（レンズ歪、または被写体の実際の動き）が残っています</td></tr>
+</table>
+
+<h4>相関の指標</h4>
+<p><b>ZNSSD</b>（ゼロ平均正規化二乗差）を使っているため、撮影ごとの明るさ・コントラストの違いには影響されません。
+合成データでは露出 +35% でも影響なしを確認しています。</p>
+
+<h4>計算の流れ</h4>
+<pre>基準画像 ─┬─→ 各画像との変位場（ZNCC探索 → 逆合成Gauss-Newton）
+          │
+          ├─→ カメラの動きをアフィン/ホモグラフィで当てはめて差し引く
+          │
+          └─→ 残った散らばり = 測定ノイズ σ（MADベースでロバストに算出）</pre>
+
+<hr>
+
+<h3 id="f-history">5.6 経時管理</h3>
+<p>測点を登録し、解析のたびに 1 回分の観測として積みます。</p>
+
+<div class="box bad">
+  <span class="t">保存はこの端末のブラウザの中だけです</span>
+  サーバーには何も送りません。<b>端末を替えると消えるので、JSON の書き出しを「保存」として扱ってください。</b>
+</div>
+
+<h4>測点</h4>
+<table>
+<tr><th>項目</th><th>意味</th></tr>
+<tr><td>名前</td><td>後で自分が分かる名前（例: A-1 橋台west面 上段き裂）</td></tr>
+<tr><td>部材</td><td>帳票用</td></tr>
+<tr><td>しきい値</td><td>任意。入れると到達年数の目安が出ます</td></tr>
+</table>
+<div class="box warn">
+  測点内で<b>量の種類を混ぜないでください</b>。
+  ターゲット対の距離と絶対幅を混ぜると、差がそのまま意味を失います。
+</div>
+
+<h4>観測の記録</h4>
+<table>
+<tr><th>項目</th><th>意味</th></tr>
+<tr><td>計測値の取り方</td><td>ターゲット対の距離、または手入力（ノギス実測など）</td></tr>
+<tr><td>この回の σ</td><td>解析結果から自動で入ります。別手段で測った場合は手入力。<b>空のまま記録すると差だけ残り、有意判定はしません</b></td></tr>
+<tr><td>気温</td><td><b>毎回入れてください。</b>温度分離に必須です</td></tr>
+<tr><td>日時</td><td>空なら解析日時</td></tr>
+</table>
+
+<h4>いつ何が出るか</h4>
+<table>
+<tr><th class="num">観測回数</th><th>出るもの</th></tr>
+<tr><td class="num">1</td><td>履歴のみ</td></tr>
+<tr><td class="num">2</td><td>前回との差、有意判定</td></tr>
+<tr><td class="num">3</td><td>傾き（mm/年）と 95% 信頼区間</td></tr>
+<tr><td class="num">4 以上・季節をまたぐ</td><td>温度係数を分離した正味の進行</td></tr>
+</table>
+<p>気温の幅が 0.5 K 未満だと分離せず、「この傾きには温度が混ざっている可能性がある」と明示します。</p>
+
+<h4>グラフ</h4>
+<ul>
+  <li><span style="color:var(--amber)">●</span> 実測値、<span style="color:var(--amber-dim)">Ⅰ</span> その回の 3σ</li>
+  <li><span style="color:var(--forest)">●</span> 温度補正後</li>
+  <li>回帰直線 — 有意なら赤の実線、有意でなければ灰の破線</li>
+</ul>
+<p>折れ線だけを見せるとノイズの範囲内の上下動を進行と読まれるため、<b>各点に 3σ のひげを必ず描いています</b>。</p>
+
+<h4>書き出し</h4>
+<table>
+<tr><th>形式</th><th>用途</th></tr>
+<tr><td>JSON</td><td>保存・別端末への引き継ぎ。読み込むと既存を残したまま統合されます</td></tr>
+<tr><td>CSV</td><td>Excel。前回差・限界・有意判定まで入ります（UTF-8 BOM 付き）</td></tr>
+</table>
+
+<hr>
+
+<h3 id="f-target">5.7 模擬ターゲットシート</h3>
+<p><a href="../targets/">targets/</a> を開いて「印刷する」を押し、A4 に<b>原寸（100%）で印刷</b>してください。
+プリンタの既定は「用紙に合わせる」で約 96% に縮むので、
+シート上のスケールバーを定規で測って 100.0 mm であることを必ず確認してください。</p>
+
+<ol class="body">
+  <li>破線で切り、<b>固定側 A</b>（3点）だけを壁や板にしっかり貼る — 剛体基準になります</li>
+  <li><b>可動側 B</b>（3点）を A の横に隙間を空けて仮止めする — き裂の向こう側の役</li>
+  <li>A1–A3 の実距離をノギスで実測（印刷倍率の誤差を吸収するため）</li>
+  <li>動かさずに 10〜20 枚撮る → <b>σ が出る</b></li>
+  <li>B 側だけを既知量ずらす（すきまゲージ 0.10 mm 等）→ もう 10 枚</li>
+  <li>ツールが<b>その既知量を当てられるか</b>確認する</li>
+</ol>
+<p>解析方式は「ターゲット」または「両方」にしてください。
+スケールは「既知の基準距離」に A1–A3 の実測値を入れるのが最も正確です。</p>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="numbers">
+<h2><span class="n">6</span>数値の読み方</h2>
+
+<h3>検出限界 3σ</h3>
+<p>き裂を挟む 2 点の相対変位なので、独立なノイズが 2 つ乗ります。</p>
+<pre>検出限界 = 3 × √2 × σ ÷ √N × (mm/px)
+                       └ N 枚平均すると √N で下がる</pre>
+
+<h3 id="sqrt2">2 時期の差は √2 倍広い</h3>
+<div class="box key">
+  <span class="t">1 日分の 3σ で判定してはいけません</span>
+  2 時期を比べるときは<b>両日のばらつきが乗る</b>ので、差の分散は σ<sub>A</sub>² + σ<sub>B</sub>²。
+  同じ精度で撮れていれば、差の限界は 1 日分の 3σ の <b>√2 倍</b>に広がります。
+  <table style="margin:8px 0 0">
+    <tr><th>σ = 0.03 mm のとき</th><th class="num">限界</th></tr>
+    <tr><td>1 日分の 3σ</td><td class="num">0.090 mm</td></tr>
+    <tr><td><b>前回との差</b></td><td class="num"><b>0.127 mm</b></td></tr>
+  </table>
+  ここを間違えると、有意でない変化を「進行」と報告してしまいます。ツールが自動で計算します。
+</div>
+
+<h3>温度による見かけの開閉</h3>
+<p>き裂は温めれば閉じ、冷やせば開きます。<b>これは進行ではありません。</b></p>
+
+<div class="box warn">
+  <span class="t">係数は文献から借りていません</span>
+  石材・目地・拘束条件で実効値が変わるため、<b>その測点自身のデータから時間との重回帰で出します</b>。
+  係数は推定値なので、その標準誤差分は判定の限界に足して真値扱いしません。
+</div>
+
+<p>これは<b>前回比較にも効かせています</b>。効かせないと、進行していないき裂を夏冬交互に測った場合に
+毎回「有意な変化」と出ます。傾きは「進行なし」なのに前回比較だけが赤く光る、という食い違いが起きるためです。</p>
+
+<pre>前回との差: +0.0000 mm → 有意差なし
+  生の差は +0.0760 mm ですが、気温が -19.0K 変わっており、
+  そのうち +0.0760 mm は温度で説明できます。</pre>
+<p>生の差も必ず併記します。黙って引き算すると、それはそれで信用できないためです。</p>
+
+<h3>傾きと信頼区間</h3>
+<p>傾きの数値だけを見ると必ず過大に読まれるので、<b>95% 信頼区間を必ず添えています</b>。
+観測回数が少ないときは t 分布を使うため（自由度 1 で t = 12.7）、簡単には「有意」になりません。</p>
+
+<h3>到達年数</h3>
+<p>しきい値を設定していて傾きが有意なときだけ出ます。起点は最終観測の生値ではなく
+<b>回帰直線上の現在値</b>（温度を分離していれば平均気温相当）です。
+冬に測った回を起点にすると、温度で開いた分だけ到達が早く出るためです。</p>
+<p>信頼区間の端から出した「早い側／遅い側」も併記します。<b>傾きが一定であるという仮定の外挿</b>であることを忘れないでください。</p>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="limits">
+<h2><span class="n">7</span>精度と限界</h2>
+
+<h3>役割を重ねない</h3>
+<table>
+<tr><th></th><th>面内（き裂の開き）</th><th>面外（はらみ出し）</th><th>スケール</th></tr>
+<tr><td><b>写真</b></td><td><b>強い</b></td><td>原理的に出ない</td><td>自前では決まらない</td></tr>
+<tr><td><b>点群</b></td><td>2 桁足りない</td><td><b>唯一の手段（5〜15 mm）</b></td><td><b>実寸で入っている</b></td></tr>
+</table>
+<p>同じ量を両方に測らせると、精度の低い方に引きずられます。だから重ねていません。</p>
+
+<h3>剥落リスクの考え方</h3>
+<p>どちらか片方だけでは判断材料になりません。</p>
+<ul>
+  <li>開いているが出ていない → まだ様子見でよい</li>
+  <li>出ているが開いていない → 元からの不陸かもしれない</li>
+  <li><b>両方 → 抜け落ちる経路が揃っている</b></li>
+</ul>
+
+<h3>絶対幅について</h3>
+<p>幅の絶対値を出すには芯線に 3 px 前後が必要です。変化の検出はサブピクセルで足りるので、
+<b>要求分解能が 2 桁違います</b>。遠方から絶対幅は出せません。</p>
+
+<div class="box bad">
+  <span class="t">生成系の超解像は使ってはいけません</span>
+  無い情報を作るため、計測には使えません。
+  複数枚を実際に統合する方式（drizzle 型）は別物で、これは正当です。
+</div>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="trouble">
+<h2><span class="n">8</span>困ったとき</h2>
+
+<table>
+<tr><th>症状</th><th>原因と対処</th></tr>
+<tr><td>σ ボタンを押しても何も起きない</td><td>ビューファインダーに理由が出ます。写真が 0 枚か 1 枚のはずです（σ は 2 枚以上必要）</td></tr>
+<tr><td>「模様が乏しく DIC が成立しません」</td><td>もう少し寄るか、斜光で陰影を出す。それでも駄目ならターゲット方式へ</td></tr>
+<tr><td>写真が読み込めない</td><td>Chrome は HEIC を読めません。JPEG で撮るか Safari を使ってください</td></tr>
+<tr><td>焦点距離が揃っていない警告</td><td>撮影中にズームが動いています。そのセッションは使えません。撮り直してください</td></tr>
+<tr><td>点群が読めない</td><td>LAZ（圧縮）は非対応です。LAS か PLY で書き出してください</td></tr>
+<tr><td>点群の「採用点」が 60% 未満</td><td>手前の植生や別の面を一緒に掴んでいます。範囲を絞ってスキャンし直してください</td></tr>
+<tr><td>面外マップが上下逆</td><td>「上方向の軸」を切り替えてください。図の向きだけの問題で、測定値は変わりません</td></tr>
+<tr><td>毎回「有意な変化」と出る</td><td>気温を記録していますか。季節をまたいで 4 回以上あれば温度分離が効きます</td></tr>
+<tr><td>傾きは「進行なし」なのに前回比較が赤い</td><td>温度分離が効いていない状態です。気温を全観測に入れてください</td></tr>
+<tr><td>履歴が消えた</td><td>ブラウザのデータを消したか、端末を替えています。JSON から復旧してください</td></tr>
+<tr><td>画面が古いまま</td><td>サービスワーカーのキャッシュです。リロードしてください</td></tr>
+</table>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="basis">
+<h2><span class="n">9</span>検証の根拠</h2>
+
+<p>合成データに既知の真値を与えて誤差を数値で確認しています（<code>node test/run.mjs</code>、151 件）。
+実写で未検証のものは「設計上の目標値」と明記する方針です。</p>
+
+<h4>DIC</h4>
+<table>
+<tr><th>項目</th><th class="num">結果</th></tr>
+<tr><td>サブピクセル変位の復元</td><td class="num">誤差 0.001〜0.005 px</td></tr>
+<tr><td>露出 +35%・オフセット変化</td><td class="num">影響なし（ZNSSD）</td></tr>
+<tr><td>ノイズ振幅 1%（8bit で ±1.3 階調）</td><td class="num">誤差 0.005 px</td></tr>
+<tr><td>手持ち相当のずれ（50 px 超）</td><td class="num">粗いアライメント後 0.003 px</td></tr>
+</table>
+
+<h4>ターゲット</h4>
+<table>
+<tr><th>項目</th><th class="num">結果</th></tr>
+<tr><td>重心のサブピクセル精度</td><td class="num"><b>0.0033 px</b>（1/300 px）</td></tr>
+<tr><td>露出 +40%・オフセット変化</td><td class="num">0.00000 px（完全に非依存）</td></tr>
+<tr><td>斜め 45° 相当の楕円</td><td class="num">誤差 0.0011 px</td></tr>
+<tr><td>模擬き裂の開口 0.37 px</td><td class="num">誤差 0.0022 px で復元</td></tr>
+</table>
+<p>しきい値で 2 値化した図心ではなく<b>輝度加重重心</b>を使っているため、
+しきい値の取り方で重心が動きません。これが 1/300 px の根拠です。</p>
+
+<h4>点群</h4>
+<table>
+<tr><th>項目</th><th class="num">結果</th></tr>
+<tr><td>はらみ出し 20 mm の復元</td><td class="num"><b>19.9 mm</b>（位置誤差 35 mm）</td></tr>
+<tr><td>外れ値（植生）12% での平面法線</td><td class="num">一致度 1.0000</td></tr>
+<tr><td>平坦な壁での偽陽性</td><td class="num"><b>0 箇所</b></td></tr>
+<tr><td>斜角 30° を無視した mm/px 誤差</td><td class="num">15.4% 過小（理論 15.5%）</td></tr>
+</table>
+
+<h4>経時管理</h4>
+<table>
+<tr><th>項目</th><th class="num">結果</th></tr>
+<tr><td>傾き 0.050 mm/年 の復元</td><td class="num">0.0535（95%CI が真値を 38/40 で含む）</td></tr>
+<tr><td>動いていない測点の偽陽性</td><td class="num"><b>40 件中 2 件</b>（95% 水準どおり）</td></tr>
+<tr><td>温度係数 −0.004 mm/K の復元</td><td class="num">−0.00396</td></tr>
+<tr><td>温度と進行が同時にある系列</td><td class="num">進行 0.0405 / 温度 −0.00374（真値 0.040 / −0.004）</td></tr>
+</table>
+
+<p class="lead">合成データなので実写より良く出ます。<b>実写の σ を測るのがこのツールの目的</b>です。</p>
+</section>
+
+</main>
+</div>
+
+<footer>
+  σ実測ツール 取扱説明書 ·
+  <a href="../">ツールを開く</a> ·
+  <a href="https://github.com/kiyoshi-terrain/crack_tracking">リポジトリ</a><br>
+  この文書はブラウザの印刷機能でそのまま紙に出せます。
+</footer>
+
+</body>
+</html>
