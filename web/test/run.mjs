@@ -12,6 +12,7 @@ import { runTargetTests } from './targets.mjs';
 import { runPointCloudTests } from './pointcloud.mjs';
 import { runSurfaceTests } from './surface.mjs';
 import { runHistoryTests } from './history.mjs';
+import { runChangeTests } from './change.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -227,6 +228,7 @@ runTargetTests(check, near);
 runPointCloudTests(check, near);
 runSurfaceTests(check, near);
 runHistoryTests(check, near);
+runChangeTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

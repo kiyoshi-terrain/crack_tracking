@@ -286,26 +286,46 @@ export function measureDisplacementField(reference, target, options = {}) {
   );
 
   const points = [];
+  const cells = [];
   let rejected = 0;
 
   for (let y = y0; y < y1; y += step) {
     for (let x = x0; x < x1; x += step) {
-      // 粗いアライメントの分だけ探索窓をずらす（手持ち撮影で数百px ずれても追える）
+      // 2時期比較では視点の違いで画面の場所ごとに初期ずれが変わる。
+      // 粗い1回目の結果から作った予測関数を渡せるようにしてある
+      const guess = options.predict ? options.predict(x, y) : initial;
+
+      // 予測先が画像外なら評価しない（端でクランプされた画素を掴ませない）
+      const gx = x + guess.dx;
+      const gy = y + guess.dy;
+      if (
+        gx < margin || gy < margin ||
+        gx > target.width - margin || gy > target.height - margin
+      ) {
+        rejected++;
+        cells.push({ x, y, zncc: null, ok: false });
+        continue;
+      }
+
       const coarse = integerSearchAround(
-        reference, target, x, y, subsetHalf, searchRange, initial.dx, initial.dy
+        reference, target, x, y, subsetHalf, searchRange, guess.dx, guess.dy
       );
       if (!coarse) {
         rejected++;
+        cells.push({ x, y, zncc: null, ok: false });
         continue;
       }
       const fine = refineSubpixel(reference, target, x, y, subsetHalf, coarse.dx, coarse.dy);
       if (!fine || fine.zncc < minZNCC) {
         rejected++;
+        // 相関低下マップのために、届いた最良の相関値は残す
+        cells.push({ x, y, zncc: fine ? fine.zncc : coarse.zncc ?? null, ok: false });
         continue;
       }
       points.push({ x, y, u: fine.dx, v: fine.dy, zncc: fine.zncc });
+      cells.push({ x, y, zncc: fine.zncc, ok: true });
     }
   }
 
-  return { points, rejected };
+  return { points, rejected, cells };
 }
