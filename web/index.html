@@ -703,6 +703,46 @@
         <b>撮影規律が精度の生命線です。</b>毎回同じ立ち位置（地面に印を）・同じ時間帯・
         曇天か日陰・乾いた壁面で。基準セットは前回の連写フォルダをそのまま使ってください。
       </p>
+
+      <hr style="border:none;border-top:1px solid var(--line);margin:18px 0">
+
+      <h3 style="margin:0 0 6px">点群の差分 — 面外の変化</h3>
+      <p class="note" style="margin-top:0">
+        写真の比較は面内（き裂の開き・進展）。こちらは前回と今回の<b>点群</b>を比べて、
+        <b>面外</b>（ブロックの浮き・はらみ出しの進行）を抽出します。剥落の直前に出るのはこちらです。
+        検出できるのは 5mm 級から。両時期とも壁の同じ側からスキャンしてください。
+      </p>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="cloudDiffLoadA">基準の点群（前回）</button>
+        <input type="file" id="cloudDiffInputA" accept=".ply,.las" class="hidden">
+        <span class="note" id="cloudDiffInfoA" style="margin:0"></span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <button id="cloudDiffLoadB">今回の点群</button>
+        <input type="file" id="cloudDiffInputB" accept=".ply,.las" class="hidden">
+        <span class="note" id="cloudDiffInfoB" style="margin:0"></span>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label for="cloudDiffCell">セルの大きさ (mm)</label>
+          <input type="number" id="cloudDiffCell" value="50" min="20" step="10">
+        </div>
+        <div>
+          <label for="cloudDiffUp">上方向の軸</label>
+          <select id="cloudDiffUp">
+            <option value="y">Y が上（Scaniverse などの PLY）</option>
+            <option value="z">Z が上（LAS など）</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="primary wide" id="cloudDiffRun" style="margin-top:12px">面外の変化を抽出する</button>
+      <div id="cloudDiffStatus" style="margin-top:12px"></div>
+      <canvas id="cloudDiffCanvas" class="hidden"></canvas>
+      <p class="note" id="cloudDiffLegend"></p>
+      <div id="cloudDiffStats"></div>
     </div>
   </section>
   <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="stepHistory">

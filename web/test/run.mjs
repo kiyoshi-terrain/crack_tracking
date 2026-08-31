@@ -13,6 +13,7 @@ import { runPointCloudTests } from './pointcloud.mjs';
 import { runSurfaceTests } from './surface.mjs';
 import { runHistoryTests } from './history.mjs';
 import { runChangeTests } from './change.mjs';
+import { runCloudChangeTests } from './cloudchange.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -229,6 +230,7 @@ runPointCloudTests(check, near);
 runSurfaceTests(check, near);
 runHistoryTests(check, near);
 await runChangeTests(check, near);
+runCloudChangeTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

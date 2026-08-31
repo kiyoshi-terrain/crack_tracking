@@ -16,6 +16,7 @@ import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloud
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
 import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
 import { initComparePanel, compareLamp } from './comparepanel.js';
+import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -229,7 +230,8 @@ function updateSteps() {
   ready('cloud', cloudState.plane ? (cloudState.plane.inlierRatio < 0.6 ? 'warn' : 'good') : null);
   ready('analyze', state.roi ? 'good' : null);
   ready('result', state.measurement != null ? 'good' : null);
-  ready('compare', compareLamp());
+  // 比較のドットは写真（面内）と点群（面外）の悪い方
+  ready('compare', worse(compareLamp(), cloudDiffLamp()));
   ready('history', historyLamp());
 
   updateHud({
@@ -436,6 +438,10 @@ initComparePanel({
   getFrames: () => state.files,
   getGsd: () => currentGSD(),
   getRoi: () => state.roi,
+  onChange: updateSteps,
+});
+
+initCloudDiffPanel({
   onChange: updateSteps,
 });
 
