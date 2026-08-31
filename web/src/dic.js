@@ -291,24 +291,8 @@ export function measureDisplacementField(reference, target, options = {}) {
 
   for (let y = y0; y < y1; y += step) {
     for (let x = x0; x < x1; x += step) {
-      // 2時期比較では視点の違いで画面の場所ごとに初期ずれが変わる。
-      // 粗い1回目の結果から作った予測関数を渡せるようにしてある
-      const guess = options.predict ? options.predict(x, y) : initial;
-
-      // 予測先が画像外なら評価しない（端でクランプされた画素を掴ませない）
-      const gx = x + guess.dx;
-      const gy = y + guess.dy;
-      if (
-        gx < margin || gy < margin ||
-        gx > target.width - margin || gy > target.height - margin
-      ) {
-        rejected++;
-        cells.push({ x, y, zncc: null, ok: false });
-        continue;
-      }
-
       const coarse = integerSearchAround(
-        reference, target, x, y, subsetHalf, searchRange, guess.dx, guess.dy
+        reference, target, x, y, subsetHalf, searchRange, initial.dx, initial.dy
       );
       if (!coarse) {
         rejected++;

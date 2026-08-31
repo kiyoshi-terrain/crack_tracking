@@ -1,0 +1,320 @@
+/**
+ * 比較パネル（2時期の変化抽出）。
+ *
+ * 「基準セット（前回の連写）」と「今回の写真セット」を重ね、
+ * 有意に動いた場所と表面が変質した場所だけを塗る。
+ * 判定はすべて change.js（純粋ロジック・検証済み）に任せ、
+ * ここは入出力と描画だけを持つ。
+ *
+ * 基準セットはツールに保存しない。前回の連写をフォルダごと取っておいて、
+ * 毎回ここへ読み込む運用（画像を localStorage に入れると容量が破綻する）。
+ */
+
+import { measureEpochChange, groupSignificant, fitTransformRobust } from './change.js';
+import { decodeFile, toGray, downsample } from './image.js';
+import { measureDisplacementField, estimateGlobalShift } from './dic.js';
+import { residuals } from './transform.js';
+import { summarize } from './sigma.js';
+
+const $ = (id) => document.getElementById(id);
+
+// 実機のメモリを守るための上限。グレースケール1枚 = 幅×高さ×4バイト
+const MAX_FRAMES_B = 5;
+
+let getFrames = () => [];
+let getGsd = () => null;
+let getRoi = () => null;
+let onChange = () => {};
+let baseFiles = [];
+let lastOutcome = null;   // 'changed' | 'surface' | 'quiet' | null
+
+export function initComparePanel(options = {}) {
+  getFrames = options.getFrames ?? (() => []);
+  getGsd = options.getGsd ?? (() => null);
+  getRoi = options.getRoi ?? (() => null);
+  onChange = options.onChange ?? (() => {});
+
+  $('compareLoad').addEventListener('click', () => $('compareInput').click());
+  $('compareInput').addEventListener('change', (e) => {
+    baseFiles = [...(e.target.files ?? [])].filter(
+      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name)
+    );
+    baseFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    $('compareBaseInfo').textContent = baseFiles.length
+      ? `${baseFiles.length} 枚（1枚目が基準、2枚目以降は基準日の σ に使います）`
+      : '';
+    e.target.value = '';
+    onChange();
+  });
+
+  $('compareRun').addEventListener('click', run);
+}
+
+/** レールのドット用。変化あり=赤 / 表面変質のみ=橙 / 変化なし=緑 / 未実行=灰 */
+export function compareLamp() {
+  if (lastOutcome === 'changed') return 'bad';
+  if (lastOutcome === 'surface') return 'warn';
+  if (lastOutcome === 'quiet') return 'good';
+  return null;
+}
+
+function status(html) {
+  $('compareStatus').innerHTML = html;
+}
+
+function banner(kind, title, body) {
+  status(`<div class="banner ${kind}"><div><b>${title}</b><br>${body}</div></div>`);
+}
+
+async function tick() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function run() {
+  const frames = getFrames();
+  if (!baseFiles.length) {
+    banner('warn', '基準セットがありません', '前回撮った連写をここへ読み込んでください。');
+    return;
+  }
+  if (frames.length < 2) {
+    banner('warn', '今回セットが足りません',
+      '写真シートに今回の連写を2枚以上読み込んでください。フレーム間のばらつきが判定の物差しになります。');
+    return;
+  }
+
+  const channel = $('channel').value;
+  const subsetHalf = clampInt($('subsetHalf').value, 5, 60, 15);
+  $('compareRun').disabled = true;
+
+  try {
+    status('<p class="note">基準画像を読み込み中…</p>');
+    await tick();
+    const baseImage = await decodeFile(baseFiles[0]);
+    const grayA = toGray(baseImage, null, channel, true);
+
+    // 基準日の σ。基準画像自身のノイズは今回セットのばらつきに出ないので、
+    // ここで測って限界に足す（2枚無ければ床値だけで判定し、その旨を明示）
+    let sigmaAPx = null;
+    if (baseFiles.length >= 2) {
+      status('<p class="note">基準日の σ を実測中…</p>');
+      await tick();
+      const second = toGray(await decodeFile(baseFiles[1]), null, channel, true);
+      const shift = estimateGlobalShift(grayA, second, downsample, { maxShiftPx: 300 });
+      const field = measureDisplacementField(grayA, second, {
+        subsetHalf, step: 40, searchRange: 3, minZNCC: 0.75, initialShift: shift,
+      });
+      if (field.points.length >= 12) {
+        const fit = fitTransformRobust(field.points, false);
+        if (fit.transform) {
+          sigmaAPx = summarize(residuals(fit.transform, field.points)).sigma;
+        }
+      }
+    }
+
+    // 今回セット。全フレームを同時にグレースケール化するとメモリが持たないので、
+    // 呼ばれたときに変換する形で渡す
+    const used = frames.slice(0, MAX_FRAMES_B);
+    const providers = used.map((f) => () => toGray(f.imageData, null, channel, true));
+
+    const roi = getRoi();
+    const stableRegion = $('compareStable').value === 'outside' && roi
+      ? (x, y) => !(x >= roi.x && x <= roi.x + roi.width && y >= roi.y && y <= roi.y + roi.height)
+      : null;
+
+    const result = await measureEpochChange(grayA, providers, {
+      subsetHalf,
+      step: 40,
+      minZNCC: 0.7,
+      useHomography: true,
+      stableRegion,
+      sigmaAPx,
+      downsample,
+      // 4000px 級では段階1を縮小画像で回す
+      coarseScale: Math.max(1, Math.round(grayA.width / 1000)),
+      yieldBetweenFrames: tick,
+      onFrame: (i, n) => status(`<p class="note">比較中… ${i + 1} / ${n} 枚</p>`),
+    });
+
+    if (!result.ok) {
+      lastOutcome = null;
+      banner('bad', '比較できませんでした',
+        `${result.reason}。構図が大きく違うか、照明条件が違いすぎる可能性があります。`
+        + '同じ立ち位置・同じ時間帯で撮り直すか、基準セットを確認してください。');
+      return;
+    }
+
+    render(result, grayA, { sigmaAPx, usedFrames: used.length, totalFrames: frames.length });
+  } catch (err) {
+    lastOutcome = null;
+    banner('bad', 'エラー', escapeHtml(err.message));
+    console.error(err);
+  } finally {
+    $('compareRun').disabled = false;
+    onChange();
+  }
+}
+
+function render(result, grayA, context) {
+  const gsd = getGsd();
+  const toMM = (px) => (gsd ? `${(px * gsd).toFixed(3)} mm` : `${px.toFixed(3)} px`);
+
+  const moved = groupSignificant(result, { minCells: 2 });
+  const surface = groupSignificant(result, { minCells: 2, which: 'decorrelated' });
+
+  lastOutcome = moved.length ? 'changed' : surface.length ? 'surface' : 'quiet';
+
+  // ── 判定の一枚看板
+  let verdict;
+  if (moved.length) {
+    const g = moved[0];
+    verdict = `<div class="banner bad"><div><b>有意に動いた領域があります</b><br>`
+      + `最大の領域: ${toMM(Math.hypot(g.du, g.dv))}（${g.cellCount} セル）。`
+      + `方向 (${g.du.toFixed(2)}, ${g.dv.toFixed(2)}) px。図の矢印を確認してください。</div></div>`;
+  } else if (surface.length) {
+    verdict = `<div class="banner warn"><div><b>動きは検出限界内。ただし表面が変質した領域があります</b><br>`
+      + `相関低下 ${result.stats.decorrelated} セル。き裂の進展・剥離・汚れ・濡れのどれかです。`
+      + `図の青い領域を写真で確認してください。</div></div>`;
+  } else {
+    verdict = `<div class="banner good"><div><b>有意な変化はありません</b><br>`
+      + `検出限界を超えて動いた場所も、表面が変質した場所もありません。</div></div>`;
+  }
+
+  // ── 数値
+  const cells = [
+    ['時期またぎ σ', result.sigmaCrossPx != null ? toMM(result.sigmaCrossPx) : '—',
+      'セルごとの実測（中央値）'],
+    ['検出限界の目安', result.sigmaCrossPx != null
+      ? toMM(result.k * Math.sqrt(
+          result.sigmaCrossPx ** 2 / context.usedFrames
+          + (result.sigmaAPx ?? 0) ** 2 + 0.02 ** 2))
+      : '—', `${result.k}σ・${context.usedFrames} 枚`],
+    ['評価セル', String(result.stats.evaluated), `使用 ${context.usedFrames}/${context.totalFrames} 枚`],
+    ['有意に動いた', String(result.stats.significant), 'セル'],
+    ['表面の変質', String(result.stats.decorrelated), 'セル'],
+  ];
+  $('compareStats').innerHTML =
+    `<div class="stats">${cells.map(([k, v, sub]) =>
+      `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div>`
+      + `<div class="k" style="margin-top:3px">${sub}</div></div>`).join('')}</div>`
+    + (context.sigmaAPx == null
+      ? '<div class="banner warn"><div>基準セットが1枚なので基準日の σ を測れません。'
+      + '限界は系統誤差の床だけで判定しています。次回から連写を基準に使ってください。</div></div>'
+      : '')
+    + (gsd == null
+      ? '<p class="note">スケール未設定のため px 表示です。スケールシートで決めると mm になります。</p>'
+      : '');
+
+  status(verdict);
+  drawMap(result, grayA, moved);
+}
+
+/**
+ * 変化マップ。基準画像を淡く敷き、有意セルだけを塗る。
+ * 「塗られたものは全部有意」— ノイズを面で描かないのはこのアプリ全体の約束。
+ */
+function drawMap(result, grayA, groups) {
+  const canvas = $('compareCanvas');
+  canvas.classList.remove('hidden');
+
+  const scale = Math.min(1, 760 / grayA.width);
+  const w = Math.round(grayA.width * scale);
+  const h = Math.round(grayA.height * scale);
+  canvas.width = w;
+  canvas.height = h;
+
+  // 基準画像（暗く敷く）
+  const off = document.createElement('canvas');
+  off.width = grayA.width;
+  off.height = grayA.height;
+  const octx = off.getContext('2d');
+  const img = octx.createImageData(grayA.width, grayA.height);
+  for (let i = 0; i < grayA.data.length; i += 1) {
+    const v = Math.max(0, Math.min(255, Math.round(grayA.data[i] * 255 * 0.55)));
+    img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+  }
+  octx.putImageData(img, 0, 0);
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(off, 0, 0, w, h);
+
+  const cell = Math.max(3, result.step * scale);
+  const maxMag = Math.max(result.stats.maxMagnitudePx, 1e-9);
+
+  // 隣接する有意セルの有無。200セルを 3σ で検定すれば単独のまぐれ当たりは
+  // 期待値的に出る。単独セルは枠だけにして、まとまった領域と格を分ける
+  const sigSet = new Set(
+    result.cells.filter((c) => c.significant).map((c) => `${c.x},${c.y}`)
+  );
+  const hasSigNeighbour = (c) => {
+    for (let dy = -result.step; dy <= result.step; dy += result.step) {
+      for (let dx = -result.step; dx <= result.step; dx += result.step) {
+        if (!dx && !dy) continue;
+        if (sigSet.has(`${c.x + dx},${c.y + dy}`)) return true;
+      }
+    }
+    return false;
+  };
+
+  for (const c of result.cells) {
+    const x = c.x * scale;
+    const y = c.y * scale;
+    if (c.decorrelated) {
+      ctx.fillStyle = 'rgba(74,125,157,0.55)';
+      ctx.fillRect(x - cell / 2, y - cell / 2, cell, cell);
+    } else if (c.significant) {
+      const t = Math.min(1, c.magnitudePx / maxMag);
+      const colour = t < 0.6
+        ? `rgba(217,154,43,${0.35 + t * 0.4})`
+        : `rgba(201,86,78,${0.55 + t * 0.3})`;
+      if (hasSigNeighbour(c)) {
+        ctx.fillStyle = colour;
+        ctx.fillRect(x - cell / 2, y - cell / 2, cell, cell);
+      } else {
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(x - cell / 2, y - cell / 2, cell, cell);
+      }
+    }
+  }
+
+  // 領域の代表矢印（変位は 1px 未満なので誇張倍率で描き、倍率を凡例に書く）
+  const exaggeration = 60;
+  ctx.strokeStyle = '#f0f4f1';
+  ctx.fillStyle = '#f0f4f1';
+  ctx.lineWidth = 1.6;
+  for (const g of groups.slice(0, 5)) {
+    const cx = ((g.bounds.x0 + g.bounds.x1) / 2) * scale;
+    const cy = ((g.bounds.y0 + g.bounds.y1) / 2) * scale;
+    const ex = cx + g.du * exaggeration * scale;
+    const ey = cy + g.dv * exaggeration * scale;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    const angle = Math.atan2(ey - cy, ex - cx);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - 7 * Math.cos(angle - 0.4), ey - 7 * Math.sin(angle - 0.4));
+    ctx.lineTo(ex - 7 * Math.cos(angle + 0.4), ey - 7 * Math.sin(angle + 0.4));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  $('compareLegend').innerHTML =
+    '<span style="color:var(--amber)">■</span>→<span style="color:var(--critical)">■</span> 有意に動いた（濃いほど大）'
+    + ' &nbsp;·&nbsp; <span style="color:#4a7d9d">■</span> 表面の変質（き裂進展・剥離など）'
+    + ` &nbsp;·&nbsp; 矢印は変位を ${exaggeration} 倍に誇張`
+    + ' &nbsp;·&nbsp; 枠だけ = 単独セル（隣接なし・弱い根拠）'
+    + ' &nbsp;·&nbsp; 塗られていない場所は検出限界内';
+}
+
+function clampInt(value, min, max, fallback) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}

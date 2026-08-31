@@ -400,7 +400,7 @@
   th { color: var(--ink-soft); font-weight: 600; font-size: 11.5px; }
   td.num, th.num { text-align: right; }
 
-  canvas#fieldCanvas, canvas#bulgeCanvas, canvas#trendCanvas {
+  canvas#fieldCanvas, canvas#bulgeCanvas, canvas#trendCanvas, canvas#compareCanvas {
     max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); display: block;
   }
   canvas#bulgeCanvas { image-rendering: pixelated; }
@@ -469,6 +469,7 @@
       <button class="rail-btn" data-sheet="cloud" data-ready="idle" id="rail-cloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16l5-6 4 4 3-3 4 5z"/><circle cx="8" cy="6.5" r="1.4"/><circle cx="14" cy="5.5" r="1.1"/><circle cx="19" cy="8" r="1.1"/></svg><span>点群</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="analyze" data-ready="idle" id="rail-analyze"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M7.5 7.5h9v9h-9z" stroke-dasharray="2 2"/></svg><span>方式</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="result" data-ready="idle" id="rail-result"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></svg><span>結果</span><span class="dot"></span></button>
+      <button class="rail-btn" data-sheet="compare" data-ready="idle" id="rail-compare"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="2"/><rect x="8" y="8" width="13" height="13" rx="2"/></svg><span>比較</span><span class="dot"></span></button>
       <button class="rail-btn" data-sheet="history" data-ready="idle" id="rail-history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18l5-7 4 3 4-7 5 5"/><path d="M3 21h18"/></svg><span>経時</span><span class="dot"></span></button>
     </div>
     <div class="shutter-wrap">
@@ -661,6 +662,47 @@
       <h3 class="sec">残差ベクトル（カメラの動きを差し引いた残り）</h3>
       <canvas id="fieldCanvas"></canvas>
       <p class="note" id="fieldNote"></p>
+    </div>
+  </section>
+  <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="stepCompare">
+    <header><h2>比較 — 前回と今回を重ねる</h2><span class="sheet-note">2時期の変化抽出</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
+    <div class="body">
+      <p class="note" style="margin-top:0">
+        前回撮った連写（基準セット）と、写真シートに読み込んだ今回の連写を比べて、
+        <b>有意に動いた場所</b>と<b>表面が変質した場所</b>（き裂の進展・剥離）だけを塗ります。
+        塗られたものは全部有意 — ノイズは面で描きません。
+      </p>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="compareLoad">基準セットを読み込む（前回の連写）</button>
+        <input type="file" id="compareInput" multiple accept="image/*" class="hidden">
+        <span class="note" id="compareBaseInfo" style="margin:0"></span>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>カメラの動きを推定する範囲（安定域）</label>
+          <select id="compareStable">
+            <option value="auto">全体からロバストに推定</option>
+            <option value="outside">解析範囲の枠の外側を使う</option>
+          </select>
+        </div>
+      </div>
+      <p class="note">
+        動くと疑う塊が画面の大部分を占める場合は、ビューファインダーで枠をその塊に合わせ、
+        「枠の外側」を選んでください。枠の外がカメラの動きの基準になります。
+      </p>
+
+      <button class="primary wide" id="compareRun" style="margin-top:12px">変化を抽出する</button>
+      <div id="compareStatus" style="margin-top:12px"></div>
+      <canvas id="compareCanvas" class="hidden"></canvas>
+      <p class="note" id="compareLegend"></p>
+      <div id="compareStats"></div>
+
+      <p class="note">
+        <b>撮影規律が精度の生命線です。</b>毎回同じ立ち位置（地面に印を）・同じ時間帯・
+        曇天か日陰・乾いた壁面で。基準セットは前回の連写フォルダをそのまま使ってください。
+      </p>
     </div>
   </section>
   <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="stepHistory">

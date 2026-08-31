@@ -5,6 +5,7 @@
 import { makeBlobs, renderBlobs } from './synthetic.mjs';
 import { measureEpochChange, groupSignificant, fitTransformRobust } from '../src/change.js';
 import { fitAffine, applyAffine } from '../src/transform.js';
+import { downsample } from '../src/image.js';
 
 const W = 340;
 const H = 340;
@@ -55,7 +56,7 @@ function decorrelateBand(blobs, band, seed) {
 const inRect = (r) => (x, y) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 const outRect = (r) => (x, y) => !inRect(r)(x, y);
 
-export function runChangeTests(check, near) {
+export async function runChangeTests(check, near) {
   const blobs = makeBlobs({ width: W, height: H, count: 1500, seed: 5 });
   const referenceA = renderBlobs(blobs, W, H, { noise: 0.01, seed: 11 });
   const OPTS = { step: 22, subsetHalf: 13, useHomography: false, k: 3 };
@@ -67,7 +68,7 @@ export function runChangeTests(check, near) {
       renderBlobs(warpBlobs(blobs, { rotateDeg: 1.5, dx: 6.3, dy: -4.1 }), W, H,
         { noise: 0.01, seed: 20 + i, gain: 1.2, offset: 0.03 }));
 
-    const r = measureEpochChange(referenceA, framesB, OPTS);
+    const r = await measureEpochChange(referenceA, framesB, OPTS);
     check('解析が成立', r.ok === true, `評価 ${r.stats.evaluated} セル`);
     check('回転1.5°でも角の測点が全滅しない（2段階探索）',
       r.stats.evaluated > 100, `${r.stats.evaluated} セル`);
@@ -87,7 +88,7 @@ export function runChangeTests(check, near) {
     // 安定域 = ブロックの外（測点の枠をブロックに合わせる運用と同じ）
     const margin = 26;
     const guard = { x0: block.x0 - margin, y0: block.y0 - margin, x1: block.x1 + margin, y1: block.y1 + margin };
-    const r = measureEpochChange(referenceA, framesB, { ...OPTS, stableRegion: outRect(guard) });
+    const r = await measureEpochChange(referenceA, framesB, { ...OPTS, stableRegion: outRect(guard) });
     check('解析が成立', r.ok === true);
 
     const groups = groupSignificant(r, { minCells: 3 });
@@ -115,7 +116,7 @@ export function runChangeTests(check, near) {
     const framesB = [0, 1, 2].map((i) =>
       renderBlobs(changed, W, H, { noise: 0.01, seed: 40 + i }));
 
-    const r = measureEpochChange(referenceA, framesB, OPTS);
+    const r = await measureEpochChange(referenceA, framesB, OPTS);
     check('解析が成立', r.ok === true);
     check('相関低下が検出される', r.stats.decorrelated >= 4, `${r.stats.decorrelated} セル`);
 
@@ -138,15 +139,33 @@ export function runChangeTests(check, near) {
     check('変質セルを変位として誤報しない', fake === 0, `${fake} セル`);
   }
 
+  console.log('\n== 2時期比較: 縮小画像で変換を掴んでも結果が同じ ==');
+  {
+    const block = { x0: 60, y0: 120, x1: 150, y1: 220, du: 0.8, dv: -0.5 };
+    const framesB = [0, 1, 2].map((i) =>
+      renderBlobs(warpBlobs(blobs, { rotateDeg: 1.0, dx: -4.2, dy: 3.5, block }), W, H,
+        { noise: 0.01, seed: 30 + i, gain: 0.9 }));
+    const margin = 26;
+    const guard = { x0: block.x0 - margin, y0: block.y0 - margin, x1: block.x1 + margin, y1: block.y1 + margin };
+    const r = await measureEpochChange(referenceA, framesB,
+      { ...OPTS, stableRegion: outRect(guard), coarseScale: 2, downsample });
+    const groups = groupSignificant(r, { minCells: 3 });
+    check('縮小段階1でも領域が1つ', groups.length === 1, `${groups.length} 領域`);
+    if (groups.length) {
+      check('変位も同等に復元', near(groups[0].du, 0.8, 0.08) && near(groups[0].dv, -0.5, 0.08),
+        `(${groups[0].du.toFixed(3)}, ${groups[0].dv.toFixed(3)}) px`);
+    }
+  }
+
   console.log('\n== 2時期比較: 基準側の σ が限界に効く ==');
   {
     const block = { x0: 100, y0: 100, x1: 180, y1: 180, du: 0.12, dv: 0 };
     const framesB = [0, 1, 2, 3].map((i) =>
       renderBlobs(warpBlobs(blobs, { dx: 2.0, dy: 1.0, block }), W, H, { noise: 0.01, seed: 50 + i }));
 
-    const strict = measureEpochChange(referenceA, framesB,
+    const strict = await measureEpochChange(referenceA, framesB,
       { ...OPTS, stableRegion: outRect({ x0: 74, y0: 74, x1: 206, y1: 206 }) });
-    const withA = measureEpochChange(referenceA, framesB,
+    const withA = await measureEpochChange(referenceA, framesB,
       { ...OPTS, sigmaAPx: 0.2, stableRegion: outRect({ x0: 74, y0: 74, x1: 206, y1: 206 }) });
 
     check('小さな変位は σ_A なしなら拾える', strict.stats.significant > 0,

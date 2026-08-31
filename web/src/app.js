@@ -15,6 +15,7 @@ import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
 import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
+import { initComparePanel, compareLamp } from './comparepanel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -228,6 +229,7 @@ function updateSteps() {
   ready('cloud', cloudState.plane ? (cloudState.plane.inlierRatio < 0.6 ? 'warn' : 'good') : null);
   ready('analyze', state.roi ? 'good' : null);
   ready('result', state.measurement != null ? 'good' : null);
+  ready('compare', compareLamp());
   ready('history', historyLamp());
 
   updateHud({
@@ -427,6 +429,13 @@ initCloudPanel({
 // 経時管理は解析結果を受け取るだけで、解析には関与しない
 initHistoryPanel({
   getMeasurement: () => state.measurement ?? null,
+  onChange: updateSteps,
+});
+
+initComparePanel({
+  getFrames: () => state.files,
+  getGsd: () => currentGSD(),
+  getRoi: () => state.roi,
   onChange: updateSteps,
 });
 

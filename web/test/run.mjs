@@ -228,7 +228,7 @@ runTargetTests(check, near);
 runPointCloudTests(check, near);
 runSurfaceTests(check, near);
 runHistoryTests(check, near);
-runChangeTests(check, near);
+await runChangeTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

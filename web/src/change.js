@@ -72,11 +72,7 @@ export function fitTransformRobust(points, useHomography = false, rounds = 2) {
  * @returns {{image: object, region: {x,y,width,height}}}
  *          region はワープ元が画像内に収まっている範囲（余白ぶん縮めてある）
  */
-export function warpToReference(frame, transform, useHomography, refWidth, refHeight, shrink) {
-  const apply = useHomography
-    ? (x, y) => applyHomography(transform, x, y)
-    : (x, y) => applyAffine(transform, x, y);
-
+export function warpToReference(frame, apply, refWidth, refHeight, shrink) {
   const out = new Float32Array(refWidth * refHeight).fill(0.5);
   let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
 
@@ -136,12 +132,7 @@ function intersectRegion(a, b) {
   };
 }
 
-function predictFrom(transform, useHomography) {
-  return (x, y) => {
-    const [X, Y] = useHomography ? applyHomography(transform, x, y) : applyAffine(transform, x, y);
-    return { dx: X - x, dy: Y - y };
-  };
-}
+
 
 /**
  * 基準時期の1枚に対して、今回セットの全フレームで変化を測る。
@@ -165,7 +156,7 @@ function predictFrom(transform, useHomography) {
  *              ここで足してやらないと限界を過小評価する
  *   k — 何σで有意とするか（既定 3）
  */
-export function measureEpochChange(referenceA, framesB, options = {}) {
+export async function measureEpochChange(referenceA, framesB, options = {}) {
   const {
     subsetHalf = 15,
     step = 25,
@@ -177,6 +168,13 @@ export function measureEpochChange(referenceA, framesB, options = {}) {
     k = 3,
     coarseSearch = 40,
     downsample = null,
+    // 実機の画素数（4000px級）では広域探索が重すぎるので、段階1だけ
+    // 縮小画像で回して変換を実寸へ引き上げる。座標の縮尺変換だけなので
+    // 変換の表現形式には依存しない
+    coarseScale = 1,
+    // フレームの合間に UI へ制御を返すための足場（ブラウザで進捗を描くため）
+    yieldBetweenFrames = null,
+    onFrame = null,
     // 系統誤差の下限[px]。フレーム間ばらつきは「フレームごとに変わる誤差」しか
     // 拾えない。三脚で全フレームが同じ構図だと、サブピクセル補間のバイアス
     // （合成検証で 0.001〜0.005px 級）が共通に乗り、ばらつきには一切出ない。
@@ -191,22 +189,33 @@ export function measureEpochChange(referenceA, framesB, options = {}) {
   const key = (x, y) => `${x},${y}`;
   const frameSummaries = [];
 
-  for (const frame of framesB) {
-    // 段階0: 画像全体の粗いずれ
+  const smallA = coarseScale > 1 && downsample ? downsample(referenceA, coarseScale) : referenceA;
+
+  for (let fi = 0; fi < framesB.length; fi += 1) {
+    if (yieldBetweenFrames) await yieldBetweenFrames();
+    if (onFrame) onFrame(fi, framesB.length);
+    // フレームは実体でも「呼んだら返す関数」でもよい。実機の画素数では
+    // 全フレームのグレースケールを同時に持つとメモリが持たないため
+    const provided = framesB[fi];
+    const frame = typeof provided === 'function' ? await provided() : provided;
+
+    // 段階1: 粗い格子・広い窓で変換を掴む（coarseScale 指定時は縮小画像で）
+    const smallF = coarseScale > 1 && downsample ? downsample(frame, coarseScale) : frame;
     const shift = downsample
-      ? estimateGlobalShift(referenceA, frame, downsample, { maxShiftPx: 400 })
+      ? estimateGlobalShift(smallA, smallF, downsample, { maxShiftPx: 400 })
       : { dx: 0, dy: 0 };
 
-    // 段階1: 粗い格子・広い窓で変換を掴む
-    const coarse = measureDisplacementField(referenceA, frame, {
+    // 探索窓も縮尺に合わせる。並進は段階0の全体シフトが受け持つので、
+    // ここで探せばいいのは回転・射影の残りぶんだけ
+    const coarse = measureDisplacementField(smallA, smallF, {
       subsetHalf,
-      step: step * 3,
-      searchRange: coarseSearch,
+      step: Math.max(10, Math.round((step * 2) / coarseScale)),
+      searchRange: Math.max(10, Math.round(coarseSearch / coarseScale)),
       minZNCC: Math.min(0.55, minZNCC),
       initialShift: shift,
-      region: region ?? undefined,
     });
-    if (coarse.points.length < 12) {
+    // 当てはめの自由度が確保できる点数か（アフィン6・ホモグラフィ8 + 余裕）
+    if (coarse.points.length < (useHomography ? 10 : 8)) {
       frameSummaries.push({ ok: false, matched: coarse.points.length });
       continue;
     }
@@ -216,10 +225,20 @@ export function measureEpochChange(referenceA, framesB, options = {}) {
       continue;
     }
 
+    const applySmall = useHomography
+      ? (x, y) => applyHomography(first.transform, x, y)
+      : (x, y) => applyAffine(first.transform, x, y);
+    const applyFull = coarseScale > 1
+      ? (x, y) => {
+          const [X, Y] = applySmall(x / coarseScale, y / coarseScale);
+          return [X * coarseScale, Y * coarseScale];
+        }
+      : applySmall;
+
     // 段階2: 変換で画像ごと基準の幾何へ戻してから、狭い窓で精密に照合する。
     // 予測付き照合では回転勾配のバイアス（0.1px級）が残る — warpToReference 参照
     const warped = warpToReference(
-      frame, first.transform, useHomography,
+      frame, applyFull,
       referenceA.width, referenceA.height, subsetHalf + 6
     );
     let fineRegion = region ? intersectRegion(warped.region, region) : warped.region;
@@ -237,12 +256,14 @@ export function measureEpochChange(referenceA, framesB, options = {}) {
       region: fineRegion,
     });
 
-    // ワープ後の残りずれ（段階1の粗さぶん、ほぼ恒等に近い）を安定域で当て直す。
-    // ここもアフィンで十分 — 大きな変換はもう画像から抜いてある
+    // ワープ後の残りずれ（段階1の粗さぶん）を安定域で当て直す。
+    // モデルは段階1と同じにする。段階1がホモグラフィで反っていた場合、
+    // アフィンの補正では角の反りを吸収できず、画面の角に系統残差が残る
+    //（実際に角へ偽の有意セルが並んだ）
     const stablePoints = stableRegion
       ? fine.points.filter((p) => stableRegion(p.x, p.y))
       : fine.points;
-    const refit = fitTransformRobust(stablePoints, false);
+    const refit = fitTransformRobust(stablePoints, useHomography);
     if (!refit.transform) {
       frameSummaries.push({ ok: false, matched: fine.points.length });
       continue;

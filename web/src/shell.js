@@ -21,6 +21,7 @@ const SHEETS = {
   scale: 'step2',
   cloud: 'stepCloud',
   analyze: 'step3',
+  compare: 'stepCompare',
   history: 'stepHistory',
   result: 'results',
 };
