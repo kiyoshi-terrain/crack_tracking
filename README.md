@@ -5,19 +5,20 @@
 ## 🔗 σ実測ツール（ブラウザで今すぐ動きます）
 
 ### **→ https://kiyoshi-terrain.github.io/crack_tracking/**
+### 取扱説明書: **https://kiyoshi-terrain.github.io/crack_tracking/manual/**
 
-> **初回のみリポジトリ設定が必要です。**
-> Settings → Pages → Build and deployment → Source を **「GitHub Actions」** に変更してください。
-> （GITHUB_TOKEN には Pages サイトを新規作成する権限が無いため、自動化できません）
-> 設定後、Actions の「Pages」ワークフローを再実行すれば公開されます。
-
-**き裂の追跡測定で、その機材・その現場で何mmの変化まで検出できるか**を実測します。
+**き裂の追跡測定で、その機材・その現場で何mmの変化まで検出できるか**を実測し、
+測点として登録して経時変化を追います。
 
 同じ場所から連続撮影した写真を2枚以上ドロップするだけ。構造物は数分では動かないので、
 そこで出た「変位」がそのまま測定ノイズ σ です。3σ が実質的な検出限界になります。
 
+- **カメラアプリ型の画面**（常時ビューファインダー + HUD）。判断に要る数値は常に画面にあります
+- **点群（PLY / LAS）を読めます** — スケールと斜め補正が自動で決まり、
+  写真には出ない**面外のはらみ出し**（剥落の前兆）が測れます
+- **経時管理** — 測点を登録して前回との差を有意判定。
+  **温度による見かけの開閉**は測点自身のデータから分離します
 - インストール不要。**画像はブラウザ内で処理され、外部に送信されません**
-- **その場で撮影して即判定できます** — 1枚あれば模様・ピント・分解能をチェック
 - **オフラインで動きます** — 一度開けば圏外の現場でも使えます
 - iPhone / Android / ミラーレスを問いません（端末固有 API に依存しない設計）
 - 高所・非接触の追跡測定を想定。LiDAR も三脚も必須ではありません
@@ -28,7 +29,7 @@
 
 ```bash
 cd web && python3 -m http.server 8080   # → http://localhost:8080
-node test/run.mjs                        # アルゴリズムの検証（18件）
+node test/run.mjs                        # アルゴリズムの検証（151件）
 ```
 
 ---
@@ -146,12 +147,19 @@ swift test
 ```
 web/                   σ実測ツール（ブラウザ完結・端末非依存）
   index.html           → https://kiyoshi-terrain.github.io/crack_tracking/
+  targets/             模擬き裂ターゲットシート（A4原寸印刷・検証用）
+  manual/              取扱説明書（オフライン・印刷可）
   src/dic.js           デジタル画像相関（ZNCC + 逆合成Gauss-Newton）
+  src/targets.js       円形ターゲットの検出と輝度加重重心
   src/transform.js     アフィン／ホモグラフィのフィット
   src/sigma.js         σ算出と検出限界
-  src/speckle.js       DIC適性の定量判定（MIG）
+  src/speckle.js       DIC適性の定量判定（MIG）とピント判定
+  src/pointcloud.js    PLY/LAS読込・ロバスト平面フィット・面外マップ
+  src/surface.js       平面 → 写真の mm/px（斜め補正）・剥落リスク
+  src/history.js       測点・2時期比較・傾き・温度分離
+  src/shell.js         カメラ風シェル（HUD・レール・シート）
   src/exif.js          焦点距離の抽出と複数枚の整合性検証
-  test/run.mjs         合成テクスチャによる検証
+  test/run.mjs         合成データによる検証（151件）
 
 Sources/CrackCore/     計測アルゴリズム（ARKit 非依存・テスト可能）
   Geometry/            カメラ幾何・平面フィット・px→mm 換算
