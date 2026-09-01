@@ -12,6 +12,7 @@
 
 import { parsePointCloud, decimate, estimateUnitScaleToMM } from './pointcloud.js';
 import { compareEpochClouds, groupChangedCells } from './cloudchange.js';
+import { alignICP, c2cDistances, c2cHeatmap } from './cloudalign.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -94,12 +95,15 @@ async function run() {
   await tick();
 
   try {
-    const result = compareEpochClouds(cloudA.points, cloudB.points, {
-      cellSize: cellMM,
-      up,
-      floor: FLOOR_MM,
-      k: 3,
-    });
+    const mode = $('cloudDiffMode')?.value ?? 'plane';
+    const result = mode === 'c2c'
+      ? runC2C(cloudA.points, cloudB.points, cellMM)
+      : compareEpochClouds(cloudA.points, cloudB.points, {
+        cellSize: cellMM,
+        up,
+        floor: FLOOR_MM,
+        k: 3,
+      });
     if (!result.ok) {
       lastOutcome = null;
       status(banner('bad', '比較できませんでした',
@@ -159,8 +163,12 @@ function render(result) {
     ['有意な変化', `${grouped.length} 領域`, `単独 ${isolated} 件は参考`],
     ['位置合わせ', result.registration.mode === 'zncc'
       ? `相関 ${result.registration.zncc.toFixed(2)}`
-      : '重心合わせ',
-      result.registration.thetaDeg ? `回転 ${result.registration.thetaDeg}°` : '回転なし'],
+      : result.registration.mode === 'icp'
+        ? `ICP 残差 ${result.registration.rms.toFixed(1)} mm`
+        : '重心合わせ',
+      result.registration.mode === 'icp'
+        ? `${result.registration.iterations} 回反復・${result.registration.inlierCount} 点`
+        : result.registration.thetaDeg ? `回転 ${result.registration.thetaDeg}°` : '回転なし'],
     ['距離', `${(result.planeA.viewpointDistance / 1000).toFixed(1)} / ${(result.planeB.viewpointDistance / 1000).toFixed(1)} m`,
       '基準 / 今回'],
   ];
@@ -172,6 +180,83 @@ function render(result) {
 
   status(verdict);
   drawMap(result, regions);
+}
+
+/**
+ * 3D 差分（ICP＋C2C）。平面法と同じ結果の形に整えて、描画・判定を共用する。
+ *
+ * - 位置合わせは ICP。全点で回すと重いので B は 4万点に間引いて解く
+ *   （対応点は全点要らない）。差分は全点で測る
+ * - セルの値は最近傍差の**法線成分**の中央値。3D 距離を主値にすると点の間隔
+ *   （サンプリング床）が全部乗る
+ * - 限界は平面法と同じ: セル値の実測ばらつき ＋ 床 ＋ 段差ぶん
+ */
+function runC2C(pointsA, pointsB, cellMM) {
+  const voxel = Math.max(10, cellMM / 3);
+  const icp = alignICP(pointsA, decimate(pointsB, 40000), { cell: voxel, maxDist: voxel * 3 });
+  const c2c = c2cDistances(pointsA, pointsB, icp.transform, {
+    cell: voxel, maxDist: voxel * 4, normal: icp.planeA.normal,
+  });
+  const hm = c2cHeatmap(pointsB, c2c, icp.planeA, icp.transform, { cellSize: cellMM });
+  const { cols, rows } = hm.grid;
+
+  const finite = [];
+  for (const v of hm.values) if (Number.isFinite(v)) finite.push(v);
+  if (!finite.length) return { ok: false };
+  const med = medianOf(finite);
+  const sigmaEmp = 1.4826 * medianOf(finite.map((v) => Math.abs(v - med)));
+
+  // 段差をまたぐセルの限界拡大（平面法と同じ理由）
+  const edgeRange = new Float64Array(cols * rows);
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      const idx = r * cols + c;
+      let m = 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nc = c + dx, nr = r + dy;
+        if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+        const nb = nr * cols + nc;
+        if (Number.isFinite(hm.values[idx]) && Number.isFinite(hm.values[nb])) {
+          m = Math.max(m, Math.abs(hm.values[nb] - hm.values[idx]));
+        }
+      }
+      edgeRange[idx] = m;
+    }
+  }
+
+  const k = 3;
+  const dz = new Float64Array(cols * rows).fill(NaN);
+  const limit = new Float64Array(cols * rows).fill(NaN);
+  const significant = new Uint8Array(cols * rows);
+  let evaluated = 0;
+  let signif = 0;
+  for (let i = 0; i < dz.length; i += 1) {
+    if (!Number.isFinite(hm.values[i])) continue;
+    evaluated += 1;
+    dz[i] = hm.values[i] - med;
+    limit[i] = k * Math.sqrt(sigmaEmp ** 2 + FLOOR_MM ** 2) + 0.6 * edgeRange[i];
+    if (Math.abs(dz[i]) > limit[i]) { significant[i] = 1; signif += 1; }
+  }
+
+  const summary = (p) => ({ rms: p.rms, viewpointDistance: p.viewpointDistance, inlierRatio: p.inlierRatio });
+  return {
+    ok: true,
+    grid: hm.grid,
+    e1: hm.e1,
+    e2: hm.e2,
+    planeA: summary(icp.planeA),
+    planeB: summary(icp.planeB),
+    registration: { mode: 'icp', rms: icp.rms, iterations: icp.iterations, inlierCount: icp.inlierCount },
+    dz, limit, significant,
+    sigmaEmp, k, floor: FLOOR_MM,
+    stats: { evaluated, significant: signif, missing: c2c.missing },
+  };
+}
+
+function medianOf(values) {
+  const a = Float64Array.from(values).sort();
+  const mid = a.length >> 1;
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
 }
 
 /** 平坦部の検出限界（mm）。目地・稜線の上はセルごとにさらに広がる。 */

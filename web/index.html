@@ -751,6 +751,13 @@
 
       <div class="row" style="margin-top:12px">
         <div>
+          <label for="cloudDiffMode">比べ方</label>
+          <select id="cloudDiffMode">
+            <option value="plane">面の高さ（平面・目地で位置合わせ）</option>
+            <option value="c2c">3D 差分（ICP 位置合わせ・C2C）</option>
+          </select>
+        </div>
+        <div>
           <label for="cloudDiffCell">セルの大きさ (mm)</label>
           <input type="number" id="cloudDiffCell" value="50" min="20" step="10">
         </div>

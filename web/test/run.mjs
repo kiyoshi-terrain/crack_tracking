@@ -15,6 +15,7 @@ import { runHistoryTests } from './history.mjs';
 import { runChangeTests } from './change.mjs';
 import { runCloudChangeTests } from './cloudchange.mjs';
 import { runCaptureTests } from './capture.mjs';
+import { runCloudAlignTests } from './cloudalign.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -233,6 +234,7 @@ runHistoryTests(check, near);
 await runChangeTests(check, near);
 runCloudChangeTests(check, near);
 runCaptureTests(check, near);
+runCloudAlignTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');
