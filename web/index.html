@@ -175,6 +175,24 @@
   #vfHint[data-kind="warn"] { border-color: rgba(217,154,43,.55); color: var(--amber); }
   #vfHint[data-kind="bad"]  { border-color: rgba(201,86,78,.55); color: var(--critical); }
 
+  /* レンズ切替のピル。カメラアプリの 0.5 / 1× / 5× に相当 */
+  #lensBar {
+    position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%);
+    display: flex; gap: 6px; padding: 4px; border-radius: 999px;
+    background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.1);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  #lensBar .lens {
+    -webkit-appearance: none; appearance: none; border: 0; border-radius: 999px;
+    background: none; color: var(--ink-soft); font: inherit; font-size: 12px; font-weight: 600;
+    padding: 5px 11px; cursor: pointer; line-height: 1.2; white-space: nowrap;
+  }
+  #lensBar .lens.on { background: rgba(255,255,255,.14); color: #fff; }
+  #lensBar .lens small { display: block; font-size: 8.5px; font-weight: 500; color: var(--ink-dim); letter-spacing: .04em; }
+  #lensBar .lens.on small { color: var(--amber); }
+  body.session-on #lensBar { opacity: .35; pointer-events: none; }
+  body:not(.live-on) #lensBar { display: none; }
+
   #vfBadge {
     position: absolute; right: 12px; top: 10px;
     font-size: 10px; letter-spacing: .06em; color: var(--amber);
@@ -481,6 +499,7 @@
       </div>
     </div>
     <div id="vfBadge" class="hidden">基準画像</div>
+    <div id="lensBar" class="hidden"></div>
     <div id="log"></div>
     <div id="vfHint" class="hidden"></div>
     <div class="progress" id="progress"><i></i></div>
@@ -562,8 +581,12 @@
           <input type="number" id="distance" step="0.01" min="0.05" inputmode="decimal" placeholder="レーザー距離計の実測値">
         </div>
         <div>
-          <label>35mm換算焦点距離（mm）</label>
-          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="EXIF から自動">
+          <label>35mm換算焦点距離（mm）— 広角 1× の値</label>
+          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="EXIF から自動（iPhone 主カメラ 24〜26）">
+        </div>
+        <div>
+          <label>望遠レンズの倍率（ライブ計測で望遠を使うとき）</label>
+          <input type="number" id="teleFactor" step="0.1" inputmode="decimal" placeholder="例: 5（Pro Max）/ 3（Pro）/ 2">
         </div>
         <div>
           <label>分解能 GSD</label>

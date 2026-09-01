@@ -19,7 +19,7 @@ import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparep
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 import {
   initCapturePanel, toggleLive, liveActive, sessionActive,
-  startSession, stopSessionEarly, stopLive,
+  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
 
@@ -89,6 +89,7 @@ async function loadFiles(fileList) {
   images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   // ファイルから読み込むときはライブ映像を閉じて、読み込んだ写真をファインダーに出す
   if (liveActive()) stopLive();
+  state.lensMultiplier = null;   // EXIF 付きなので焦点距離はそのまま
 
   const errors = [];
   for (const [i, file] of images.entries()) {
@@ -223,6 +224,9 @@ function nextAction() {
   if (n === 0) return null;                       // 空状態の案内は vf-empty が出している
   if (n === 1) return 'あと1枚以上撮ると σ が出ます';
   if (state.measurement) return null;
+  if (state.lensMultiplier?.kind === 'tele' && state.lensMultiplier.factor == null) {
+    return '望遠レンズで撮りました。スケールシートで望遠の倍率を入れると mm で出ます';
+  }
   if (currentGSD() == null) return 'スケールを決めると mm で出ます（未入力でも px では出ます）';
   return 'σ を押すと実測します';
 }
@@ -249,6 +253,7 @@ function updateSteps() {
   // 比較のドットは写真（面内）と点群（面外）の悪い方
   ready('compare', worse(compareLamp(), cloudDiffLamp()));
   ready('history', historyLamp());
+  renderLensBar();
 
   updateHud({
     frames: n,
@@ -268,6 +273,40 @@ function updateSteps() {
   $('vfBadge').classList.toggle('hidden', n === 0);
   updateScopes();
   showHint();
+}
+
+/**
+ * レンズ切替のピル（カメラアプリの 0.5 / 1× / 5× 相当）。
+ * レンズが1つでズームも無い端末では出さない。計測中は触れない。
+ * 望遠は分解能が焦点距離に比例して上がる（高所・遠方の主戦力）。
+ * ズームはデジタルなので 2× までに絞り、その旨を出す。
+ */
+function renderLensBar() {
+  const bar = $('lensBar');
+  if (!bar) return;
+  if (!liveActive()) { bar.innerHTML = ''; bar.classList.add('hidden'); return; }
+  const ls = lensState();
+  const names = { ultra: '超広角', wide: '広角', tele: '望遠' };
+  const seen = {};
+  const items = ls.lenses.map((l) => {
+    seen[l.kind] = (seen[l.kind] ?? 0) + 1;
+    const label = seen[l.kind] > 1 ? `${names[l.kind]} ${seen[l.kind]}` : names[l.kind];
+    return `<button class="lens${l.deviceId === ls.activeDeviceId ? ' on' : ''}" data-lens="${l.deviceId}">${label}</button>`;
+  });
+  if (ls.zoom) {
+    const steps = [1, 2].filter((z) => z <= ls.zoom.max);
+    for (const z of steps) {
+      const on = Math.abs((ls.zoom.value || 1) - z) < 0.05;
+      items.push(`<button class="lens zoom${on ? ' on' : ''}" data-zoom="${z}">${z}×${z > 1 ? '<small>デジタル</small>' : ''}</button>`);
+    }
+  }
+  if (items.length <= 1) { bar.innerHTML = ''; bar.classList.add('hidden'); return; }
+  bar.innerHTML = items.join('');
+  bar.classList.remove('hidden');
+  bar.querySelectorAll('[data-lens]').forEach((b) => b.addEventListener('click', async () => {
+    try { await switchLens(b.dataset.lens); } catch (e) { setViewfinderHint(`レンズを切り替えられません: ${e.message}`, 'warn'); }
+  }));
+  bar.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => setZoom(Number(b.dataset.zoom))));
 }
 
 function setNote(id, text) {
@@ -380,7 +419,7 @@ function setupScale() {
   updateGSD();
 }
 
-for (const id of ['distance', 'focal35', 'referenceLength']) {
+for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
   $(id).addEventListener('input', () => { refreshCloudScale(); updateGSD(); });
 }
 $('referencePair').addEventListener('change', updateGSD);
@@ -398,13 +437,39 @@ function currentGSD() {
   if (fromCloud > 0) return fromCloud;
 
   const distance = parseFloat($('distance').value);
-  const focal35 = parseFloat($('focal35').value);
+  const focal35 = effectiveFocal35();
   if (!(distance > 0) || !(focal35 > 0)) return null;
   const focalPx = focalLengthPxFrom35mm({
     focal35mm: focal35,
     imageWidthPx: Math.max(state.files[0].imageData.width, state.files[0].imageData.height),
   });
   return computeGSD({ distanceM: distance, focalLengthPx: focalPx });
+}
+
+/**
+ * 35mm換算焦点距離の実効値。
+ * EXIF 付きの写真は入力値そのまま。ライブ計測のフレームは撮ったレンズの倍率と
+ * ズームを掛ける（スケールシートの焦点距離は広角 1× の値として扱う）。
+ * 望遠の倍率は API から取れないので、スケールシートで一度入れてもらう。
+ */
+function effectiveFocal35() {
+  const base = parseFloat($('focal35').value);
+  if (!(base > 0)) return null;
+  const m = state.lensMultiplier;
+  if (!m) return base;
+  return m.factor != null ? base * m.factor * (m.zoom || 1) : null;
+}
+
+/** いまのレンズの倍率。望遠は入力必須（無ければ null → mm が出ず、その理由を出す）。 */
+function lensMultiplierNow() {
+  const ls = lensState();
+  const zoom = ls.zoom?.value || 1;
+  if (ls.activeKind === 'tele') {
+    const f = parseFloat($('teleFactor').value);
+    return { kind: 'tele', factor: f > 0 ? f : null, zoom };
+  }
+  if (ls.activeKind === 'ultra') return { kind: 'ultra', factor: 0.5, zoom };
+  return { kind: 'wide', factor: 1, zoom };
 }
 
 function updateGSD() {
@@ -430,7 +495,7 @@ function gsdSourceName() {
  */
 function cameraIntrinsics() {
   if (!state.files.length) return null;
-  const focal35 = parseFloat($('focal35').value);
+  const focal35 = effectiveFocal35();
   if (!(focal35 > 0)) return null;
   const { width, height } = state.files[0].imageData;
   const focalLengthPx = focalLengthPxFrom35mm({
@@ -501,11 +566,11 @@ $('baselineSaveBtn').addEventListener('click', async () => {
 const SCALE_KEY = 'sigma-scale-inputs';
 try {
   const saved = JSON.parse(localStorage.getItem(SCALE_KEY)) || {};
-  for (const id of ['distance', 'focal35', 'referenceLength']) {
+  for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
     if (saved[id] && !$(id).value) $(id).value = saved[id];
   }
 } catch { /* プライベートモード等では記憶しないだけ */ }
-for (const id of ['distance', 'focal35', 'referenceLength']) {
+for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
   $(id).addEventListener('input', () => {
     try {
       const saved = JSON.parse(localStorage.getItem(SCALE_KEY)) || {};
@@ -674,6 +739,7 @@ async function runMeasurement() {
 async function setLiveFrames(records) {
   state.files.forEach((f) => URL.revokeObjectURL(f.url));
   state.files = [];
+  state.lensMultiplier = lensMultiplierNow();
   for (const r of records) {
     const small = downsample(toGray(r.imageData, null, 'luma', true),
       Math.max(1, Math.round(r.imageData.width / 700)));

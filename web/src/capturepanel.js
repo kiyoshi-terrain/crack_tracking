@@ -31,6 +31,10 @@ let overlay = null;    // ゴースト＋誘導矢印の描画先
 let deps = null;
 
 let liveTimer = null;
+let lenses = [];          // [{deviceId, label, kind: 'ultra'|'wide'|'tele'}]
+let activeDeviceId = null;
+let currentZoom = 1;
+const LENS_KEY = 'live-lens';
 let session = null;    // { frames: [{imageData, small, focus}], sigmas, limits, rejects, timer }
 let baseline = null;   // { small, bitmap, name } 再訪照合用
 let alignedStreak = 0;
@@ -55,20 +59,49 @@ export async function toggleLive() {
   return true;
 }
 
+/** カメラを開く。deviceId があればそのレンズ、無ければ背面の既定（広角）。 */
+async function openStream(deviceId) {
+  const video = deviceId
+    ? { deviceId: { exact: deviceId }, width: { ideal: 3840 }, height: { ideal: 2160 } }
+    : { facingMode: 'environment', width: { ideal: 3840 }, height: { ideal: 2160 } };
+  return navigator.mediaDevices.getUserMedia({ video, audio: false });
+}
+
+/**
+ * 背面レンズの一覧。許可が下りた後でないとラベルが空なので、最初の getUserMedia の後に呼ぶ。
+ * iOS Safari は「背面望遠カメラ」「背面超広角カメラ」を個別の device として出す。
+ * 倍率は API から取れないので、種別（超広角/広角/望遠）だけ判定する。
+ */
+async function refreshLenses() {
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+  const back = devices.filter((d) => d.kind === 'videoinput' && !/front|前面|フロント|user/i.test(d.label));
+  const kindOf = (label) => /tele|望遠/i.test(label) ? 'tele'
+    : /ultra|超広角/i.test(label) ? 'ultra' : 'wide';
+  // デュアル/トリプルの「合成カメラ」は個別レンズと重複するので除く
+  const singles = back.filter((d) => !/dual|triple|デュアル|トリプル/i.test(d.label));
+  const rank = { ultra: 0, wide: 1, tele: 2 };
+  lenses = (singles.length ? singles : back)
+    .map((d) => ({ deviceId: d.deviceId, label: d.label, kind: kindOf(d.label) }))
+    .sort((a, b) => rank[a.kind] - rank[b.kind]);
+}
+
 async function startLive() {
   const vf = $('viewfinder');
+  let remembered = null;
+  try { remembered = localStorage.getItem(LENS_KEY); } catch { /* 記憶なし */ }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 3840 },
-        height: { ideal: 2160 },
-      },
-      audio: false,
-    });
-  } catch (err) {
-    throw new Error('カメラを起動できませんでした。ブラウザのカメラ許可を確認するか、写真シートから読み込んでください');
+    stream = await openStream(remembered);
+  } catch {
+    try {
+      stream = await openStream(null);   // 記憶したレンズが無い端末（機種変更など）
+    } catch (err) {
+      throw new Error('カメラを起動できませんでした。ブラウザのカメラ許可を確認するか、写真シートから読み込んでください');
+    }
   }
+  activeDeviceId = stream.getVideoTracks()[0]?.getSettings?.().deviceId ?? remembered;
+  currentZoom = stream.getVideoTracks()[0]?.getSettings?.().zoom ?? 1;
+  await refreshLenses();
 
   video = document.createElement('video');
   video.id = 'liveVideo';
@@ -85,6 +118,50 @@ async function startLive() {
   document.body.classList.add('live-on');
   liveTimer = setInterval(liveCheck, LIVE_CHECK_MS);
   deps.onStateChange?.();
+}
+
+/** いまのレンズとズームの状態。UI（レンズ切替のピル）とスケール計算が読む。 */
+export function lensState() {
+  const track = stream?.getVideoTracks()[0];
+  let zoom = null;
+  const caps = track?.getCapabilities?.();
+  if (caps && caps.zoom && Number.isFinite(caps.zoom.max) && caps.zoom.max > 1) {
+    zoom = { min: caps.zoom.min ?? 1, max: caps.zoom.max, value: currentZoom };
+  }
+  const active = lenses.find((l) => l.deviceId === activeDeviceId) ?? null;
+  return { lenses, activeDeviceId, activeKind: active?.kind ?? 'wide', zoom };
+}
+
+/** レンズを切り替える（計測中は不可）。 */
+export async function switchLens(deviceId) {
+  if (!stream || session || deviceId === activeDeviceId) return false;
+  const next = await openStream(deviceId);
+  stream.getTracks().forEach((t) => t.stop());
+  stream = next;
+  video.srcObject = stream;
+  await video.play();
+  activeDeviceId = deviceId;
+  currentZoom = stream.getVideoTracks()[0]?.getSettings?.().zoom ?? 1;
+  try { localStorage.setItem(LENS_KEY, deviceId); } catch { /* 記憶できないだけ */ }
+  deps.onStateChange?.();
+  return true;
+}
+
+/**
+ * ズーム（対応端末のみ）。デジタルズームは画を切り出すだけで分解能は上がらない
+ * （48MP 機のセンサークロップ 2× までは実質的に上がる）。UI 側で 2× までに絞る。
+ */
+export async function setZoom(z) {
+  const track = stream?.getVideoTracks()[0];
+  if (!track || session) return false;
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: z }] });
+    currentZoom = track.getSettings?.().zoom ?? z;
+    deps.onStateChange?.();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function stopLive() {
