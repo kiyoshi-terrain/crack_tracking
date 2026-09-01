@@ -226,7 +226,7 @@ export function startSession() {
   if (!video || session) return false;
   session = { frames: [], sigmas: [], limits: [], rejects: 0 };
   document.body.classList.add('session-on');
-  setLiveStatus('計測中… そのまま動かさないでください', 'info');
+  setLiveStatus('計測 開始 · 動かさないでください', 'rec');
   session.timer = setInterval(captureFrame, FRAME_INTERVAL_MS);
   deps.onStateChange?.();
   return true;
@@ -275,13 +275,13 @@ async function captureFrame() {
       if (est) {
         session.limits.push(est.mm ?? est.px);
         setLiveStatus(
-          `計測中 ${session.frames.length} 枚 · 限界の見積もり ${est.mm != null
-            ? `${est.mm.toFixed(3)} mm` : `${est.px.toFixed(3)} px`} · 収束待ち`, 'info');
+          `計測 ${session.frames.length}枚 · 限界 ${est.mm != null
+            ? `${est.mm.toFixed(3)} mm` : `${est.px.toFixed(3)} px`}`, 'rec');
       } else {
-        setLiveStatus(`計測中 ${session.frames.length} 枚`, 'info');
+        setLiveStatus(`計測 ${session.frames.length}枚`, 'rec');
       }
     } else {
-      setLiveStatus('計測中 1 枚（基準）', 'info');
+      setLiveStatus('計測 1枚（基準）', 'rec');
     }
   }
 

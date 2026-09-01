@@ -345,6 +345,8 @@ function updateScopes() {
     : 'σ を実測してください';
 
   const h = historySummary();
+  // 「測っていない」を「差なし」に見せない。測点が無いうちは項目ごと出さない
+  $('scopeHistory')?.classList.toggle('hidden', !h.stationCount);
   $('scopeDelta').textContent = h.deltaMM != null
     ? `${h.deltaMM > 0 ? '+' : ''}${h.deltaMM.toFixed(4)}`
     : '—';
