@@ -19,7 +19,7 @@ import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparep
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 import {
   initCapturePanel, toggleLive, liveActive, sessionActive,
-  startSession, stopSessionEarly,
+  startSession, stopSessionEarly, stopLive,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
 
@@ -87,6 +87,8 @@ async function loadFiles(fileList) {
   );
   if (!images.length) return;
   images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  // ファイルから読み込むときはライブ映像を閉じて、読み込んだ写真をファインダーに出す
+  if (liveActive()) stopLive();
 
   const errors = [];
   for (const [i, file] of images.entries()) {
@@ -513,6 +515,25 @@ for (const id of ['distance', 'focal35', 'referenceLength']) {
 
 initShell();
 updateSteps();
+
+// カメラアプリなので起動＝ファインダー。許可が無い・カメラが無い端末では
+// 黙って従来の空画面に落ち、◉ から手で起こせる
+async function autoStartLive() {
+  if (!navigator.mediaDevices?.getUserMedia || liveActive() || state.files.length) return;
+  try {
+    await toggleLive();
+    setViewfinderHint('σ を押すと自動で撮り続け、収束したら止まります', 'info');
+  } catch {
+    setViewfinderHint('カメラを使うには ◉ を押して許可してください。写真の読み込みは右の「写真」から', 'info');
+  }
+}
+autoStartLive();
+
+// 裏に回ったらカメラを止める（電池）。戻ってきたら、写真を読み込んでいなければ再開
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (liveActive() && !sessionActive()) stopLive(); }
+  else autoStartLive();
+});
 
 // 画面の向きが変わるとビューファインダーの実寸が変わる。ROI の枠を置き直す
 window.addEventListener('shell:resize', () => { if (state.roi) setRoi(state.roi); });
