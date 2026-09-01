@@ -6,7 +6,7 @@
 //
 // 更新方法: ファイルを変えたら CACHE の版を上げる。
 
-const CACHE = 'sigma-tool-v7';
+const CACHE = 'sigma-tool-v8';
 
 // src/ 配下のモジュールは**全部**並べること。1本でも漏れると、
 // 圏外でその機能だけ静かに動かなくなる（targets.js が実際に漏れていた）。
@@ -31,6 +31,9 @@ const SHELL = [
   './src/cloudpanel.js',
   './src/change.js',
   './src/comparepanel.js',
+  './src/capture.js',
+  './src/capturepanel.js',
+  './src/store.js',
   './src/cloudchange.js',
   './src/clouddiffpanel.js',
   './src/history.js',

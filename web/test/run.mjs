@@ -14,6 +14,7 @@ import { runSurfaceTests } from './surface.mjs';
 import { runHistoryTests } from './history.mjs';
 import { runChangeTests } from './change.mjs';
 import { runCloudChangeTests } from './cloudchange.mjs';
+import { runCaptureTests } from './capture.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -231,6 +232,7 @@ runSurfaceTests(check, near);
 runHistoryTests(check, near);
 await runChangeTests(check, near);
 runCloudChangeTests(check, near);
+runCaptureTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

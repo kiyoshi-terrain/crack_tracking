@@ -15,8 +15,13 @@ import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
 import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
-import { initComparePanel, compareLamp } from './comparepanel.js';
+import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparepanel.js';
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
+import {
+  initCapturePanel, toggleLive, liveActive, sessionActive,
+  startSession, stopSessionEarly,
+} from './capturepanel.js';
+import { saveBaseline } from './store.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,9 +47,18 @@ $('fileInput').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
-// capture 属性で端末のカメラアプリが開き、最大解像度＋EXIF 付きで返ります。
-// getUserMedia のプレビュー映像だと解像度が落ちるので、計測用にはこちらを使います。
-$('cameraBtn').addEventListener('click', () => $('cameraInput').click());
+// ◉ はライブ計測（getUserMedia のライブ映像＋自動セッション）。
+// EXIF 付きの静止画が要るときは写真シートの「1枚ずつ撮る」（capture 属性）を使う
+$('cameraBtn').addEventListener('click', async () => {
+  try {
+    const on = await toggleLive();
+    if (on) setViewfinderHint('σ を押すと自動で撮り続け、収束したら止まります', 'info');
+  } catch (err) {
+    setViewfinderHint(err.message, 'warn');
+    openSheet('photo');
+  }
+});
+$('captureStillBtn').addEventListener('click', () => $('cameraInput').click());
 $('cameraInput').addEventListener('change', (e) => {
   loadFiles([...e.target.files]);
   e.target.value = '';
@@ -445,6 +459,58 @@ initCloudDiffPanel({
   onChange: updateSteps,
 });
 
+initCapturePanel({
+  setFrames: setLiveFrames,
+  runAnalysis: runMeasurement,
+  getGsd: () => currentGSD(),
+  onStateChange: updateSteps,
+  // ライブ中はスコープ帯をライブ映像の判定で上書きする
+  onLiveQuality: ({ quality, focus }) => {
+    setBar('barTexture', quality.mig / 0.02, verdictToLamp(quality.verdict));
+    setBar('barFocus', focus / 0.35, quality.verdict === 'poor' ? 'bad' : 'good');
+    $('scopeQualityNote').textContent = `ライブ — ${quality.reason}`;
+  },
+  onLiveStatus: (text, kind) => setViewfinderHint(text, kind === 'good' ? 'info' : kind),
+});
+
+// 計測後に「基準として保存」。次回はフォルダ読み込みなしで比較できる
+$('baselineSaveBtn').addEventListener('click', async () => {
+  const name = $('baselineName').value.trim();
+  if (!name) { $('baselineName').focus(); return; }
+  if (!state.files.length) return;
+  try {
+    await saveBaseline(name, state.files.map((f) => f.file), {
+      gsd: currentGSD(),
+      focal35: parseFloat($('focal35').value) || null,
+      distanceM: parseFloat($('distance').value) || null,
+      capturedAt: new Date().toISOString(),
+    });
+    $('baselineSaveBtn').textContent = '保存しました';
+    setTimeout(() => { $('baselineSaveBtn').textContent = '保存'; }, 1800);
+    refreshSavedBaselines();
+  } catch (err) {
+    setViewfinderHint(`保存できませんでした: ${err.message}`, 'warn');
+  }
+});
+
+// スケール入力は端末に記憶する。毎回同じ機材なら、二度目からは入力なしで mm が出る
+const SCALE_KEY = 'sigma-scale-inputs';
+try {
+  const saved = JSON.parse(localStorage.getItem(SCALE_KEY)) || {};
+  for (const id of ['distance', 'focal35', 'referenceLength']) {
+    if (saved[id] && !$(id).value) $(id).value = saved[id];
+  }
+} catch { /* プライベートモード等では記憶しないだけ */ }
+for (const id of ['distance', 'focal35', 'referenceLength']) {
+  $(id).addEventListener('input', () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SCALE_KEY)) || {};
+      saved[id] = $(id).value;
+      localStorage.setItem(SCALE_KEY, JSON.stringify(saved));
+    } catch { /* 同上 */ }
+  });
+}
+
 initShell();
 updateSteps();
 
@@ -549,12 +615,20 @@ function runBlockReason() {
 }
 
 $('run').addEventListener('click', async () => {
+  // ライブ中のシャッターは「計測セッション」。枚数と終了はアプリが決める
+  if (sessionActive()) { stopSessionEarly(); return; }
+  if (liveActive()) { startSession(); return; }
+
   const block = runBlockReason();
   if (block) {
     setViewfinderHint(block.reason, 'warn');
     openSheet(block.sheet);
     return;
   }
+  await runMeasurement();
+});
+
+async function runMeasurement() {
   closeSheet();
   $('run').disabled = true;
   $('progress').classList.add('on');
@@ -567,7 +641,34 @@ $('run').addEventListener('click', async () => {
   $('progress').classList.remove('on');
   setProgress(0);
   $('run').disabled = false;
-});
+}
+
+/**
+ * ライブセッションで撮れたフレームを写真セットとして差し替える。
+ * getUserMedia のフレームには EXIF が無いので、焦点距離は端末に記憶した値
+ * （スケールシート）・点群・基準距離のどれかに任せる。
+ */
+async function setLiveFrames(records) {
+  state.files.forEach((f) => URL.revokeObjectURL(f.url));
+  state.files = [];
+  for (const r of records) {
+    const small = downsample(toGray(r.imageData, null, 'luma', true),
+      Math.max(1, Math.round(r.imageData.width / 700)));
+    state.files.push({
+      file: new File([r.blob], r.name, { type: 'image/jpeg' }),
+      exif: {},
+      imageData: r.imageData,
+      url: URL.createObjectURL(r.blob),
+      quality: speckleQuality(small, { subsetHalf: 9 }),
+      focus: focusScore(small),
+    });
+  }
+  renderThumbs();
+  refreshCloudScale();
+  setupPreview();
+  renderQuickCheck();
+  updateSteps();
+}
 
 async function analyze() {
   const channel = $('channel').value;

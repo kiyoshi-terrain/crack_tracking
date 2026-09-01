@@ -133,6 +133,13 @@
     border-top: 1px solid #fff; border-bottom: 1px solid #fff;
   }
 
+  /* ライブ計測。映像とゴースト／誘導の重ねはビューファインダー全面 */
+  #liveVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #liveOverlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  body.live-on #preview, body.live-on .vf-empty { display: none; }
+  body.live-on #cameraBtn { border-color: var(--amber); color: var(--amber); }
+  body.session-on .shutter { background: var(--critical); border-color: var(--critical); color: #fff; }
+
   .vf-empty {
     position: absolute; inset: 0; display: grid; place-items: center;
     color: var(--ink-dim); font-size: 13px; text-align: center; padding: 24px;
@@ -473,7 +480,7 @@
       <button class="rail-btn" data-sheet="history" data-ready="idle" id="rail-history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18l5-7 4 3 4-7 5 5"/><path d="M3 21h18"/></svg><span>経時</span><span class="dot"></span></button>
     </div>
     <div class="shutter-wrap">
-      <button class="mini" id="cameraBtn" title="その場で撮影" aria-label="その場で撮影"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.6-2.2h4.8L16 6"/></svg></button>
+      <button class="mini" id="cameraBtn" title="ライブ計測（カメラ）" aria-label="ライブ計測（カメラ）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="14" rx="2.5"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.6-2.2h4.8L16 6"/></svg></button>
       <button class="shutter" id="run" data-ready="0" title="σ を実測する" aria-label="σ を実測する">σ</button>
     </div>
   </div>
@@ -486,9 +493,11 @@
     <header><h2>写真</h2><span class="sheet-note" id="note1">2枚以上</span><button class="sheet-close" data-close-sheet aria-label="閉じる">×</button></header>
     <div class="body">
 <div class="btn-row">
-        <button class="primary" id="cameraBtn">その場で撮影</button>
+        <button class="primary" id="captureStillBtn">1枚ずつ撮る（EXIF付き）</button>
         <button id="clearBtn">すべて削除</button>
       </div>
+      <p class="note" style="margin-top:6px">連写は ◉（ライブ計測）が楽です。押したら自動で撮り続け、
+        σ が収束したら勝手に止まって結果まで出ます。</p>
       <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
       <div id="drop">
         写真をドロップ、またはタップして選択（追加していけます）<br>
@@ -644,10 +653,6 @@
         </div>
         <p class="note">サブセットは大きいほど精度が上がり分解能が下がります。31px角（半径15）が標準的な出発点です。</p>
       </details>
-<button class="primary wide" id="run" disabled>σ を実測する</button>
-      <div class="progress" id="progress"><i></i></div>
-      <div id="vfBadge" class="hidden">基準画像</div>
-    <div id="log"></div>
     </div>
   </section>
   <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="results">
@@ -655,6 +660,17 @@
     <div class="body">
 <div class="verdict" id="verdict"></div>
       <div class="stats" id="stats"></div>
+
+      <div class="row" id="baselineSave" style="align-items:flex-end">
+        <div style="flex:1">
+          <label for="baselineName">この連写を基準として保存（測点名）</label>
+          <input type="text" id="baselineName" placeholder="例: 東面-下部">
+        </div>
+        <div><button id="baselineSaveBtn">保存</button></div>
+      </div>
+      <p class="note">保存すると、次回は比較シートで測点を選ぶだけで前回との比較ができます
+        （この端末の中だけに保存されます）。</p>
+
       <div id="quality"></div>
       <div id="frameTable" class="scroll-x"></div>
       <div id="targetResults"></div>
@@ -673,8 +689,17 @@
         塗られたものは全部有意 — ノイズは面で描きません。
       </p>
 
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button id="compareLoad">基準セットを読み込む（前回の連写）</button>
+      <div class="row" id="savedBaselineRow" style="align-items:flex-end">
+        <div style="flex:1">
+          <label for="compareSaved">保存済みの基準（測点）</label>
+          <select id="compareSaved"><option value="">— 保存された測点はまだありません —</option></select>
+        </div>
+        <div><button id="compareUseSaved">使う</button></div>
+        <div><button id="compareRevisit" title="ライブ映像を前回と照合し、位置が合ったら自動で計測します">再訪ガイド</button></div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+        <button id="compareLoad">ファイルから読み込む（前回の連写）</button>
         <input type="file" id="compareInput" multiple accept="image/*" class="hidden">
         <span class="note" id="compareBaseInfo" style="margin:0"></span>
       </div>

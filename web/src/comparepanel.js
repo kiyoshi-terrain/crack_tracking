@@ -15,6 +15,9 @@ import { decodeFile, toGray, downsample } from './image.js';
 import { measureDisplacementField, estimateGlobalShift } from './dic.js';
 import { residuals } from './transform.js';
 import { summarize } from './sigma.js';
+import { listBaselines, getBaseline } from './store.js';
+import { setBaseline as setCaptureBaseline, liveActive, toggleLive } from './capturepanel.js';
+import { closeSheet } from './shell.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -48,6 +51,69 @@ export function initComparePanel(options = {}) {
   });
 
   $('compareRun').addEventListener('click', run);
+
+  $('compareUseSaved').addEventListener('click', useSavedBaseline);
+  $('compareRevisit').addEventListener('click', startRevisit);
+  refreshSavedBaselines();
+}
+
+/** 保存済みの基準（測点）の一覧を出す。保存直後にも呼ばれる。 */
+export async function refreshSavedBaselines() {
+  const select = $('compareSaved');
+  if (!select) return;
+  try {
+    const rows = await listBaselines();
+    select.innerHTML = rows.length
+      ? rows.map((r) =>
+          `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}` +
+          `（${r.count} 枚・${r.savedAt.slice(0, 10)}）</option>`).join('')
+      : '<option value="">— 保存された測点はまだありません —</option>';
+  } catch {
+    select.innerHTML = '<option value="">— この端末では保存を使えません —</option>';
+  }
+}
+
+/** 保存済みの基準を基準セットとして使う。フォルダ読み込みの置き換え。 */
+async function useSavedBaseline() {
+  const name = $('compareSaved').value;
+  if (!name) { banner('warn', '測点がありません', '結果シートの「基準として保存」で先に保存してください。'); return; }
+  const row = await getBaseline(name);
+  if (!row) { banner('warn', '読み出せませんでした', '保存が消えている可能性があります。'); return; }
+  baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
+  $('compareBaseInfo').textContent =
+    `基準「${name}」 ${baseFiles.length} 枚（${row.savedAt.slice(0, 10)} 保存）`;
+  onChange();
+}
+
+/**
+ * 再訪ガイド。保存済みの基準とライブ映像を機械が照合し、
+ * 矢印で立ち位置を誘導、位置が合ったら自動でセッションを始める。
+ * 人がやるのは歩くことだけ。
+ */
+async function startRevisit() {
+  const name = $('compareSaved').value;
+  if (!name) { banner('warn', '測点がありません', '結果シートの「基準として保存」で先に保存してください。'); return; }
+  const row = await getBaseline(name);
+  if (!row) { banner('warn', '読み出せませんでした', '保存が消えている可能性があります。'); return; }
+
+  // 比較用の基準もこの測点に揃える（撮影後そのまま「変化を抽出」できる）
+  baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
+  $('compareBaseInfo').textContent = `基準「${name}」 ${baseFiles.length} 枚`;
+
+  const refImage = await decodeFile(baseFiles[0]);
+  const factor = Math.max(1, Math.round(refImage.width / 420));
+  const small = downsample(toGray(refImage, null, 'luma', true), factor);
+  const bitmap = await createImageBitmap(baseFiles[0]);
+  setCaptureBaseline({ small, bitmap, name });
+
+  try {
+    if (!liveActive()) await toggleLive();
+    closeSheet();
+  } catch (err) {
+    setCaptureBaseline(null);
+    banner('bad', 'カメラを起動できませんでした', escapeHtml(err.message));
+  }
+  onChange();
 }
 
 /** レールのドット用。変化あり=赤 / 表面変質のみ=橙 / 変化なし=緑 / 未実行=灰 */
