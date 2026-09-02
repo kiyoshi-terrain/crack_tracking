@@ -6,7 +6,7 @@
 //
 // 更新方法: ファイルを変えたら CACHE の版を上げる。
 
-const CACHE = 'sigma-tool-v15';
+const CACHE = 'sigma-tool-v16';
 
 // src/ 配下のモジュールは**全部**並べること。1本でも漏れると、
 // 圏外でその機能だけ静かに動かなくなる（targets.js が実際に漏れていた）。
@@ -42,9 +42,16 @@ const SHELL = [
   './src/version.js',
 ];
 
+// 取り直しは必ず HTTP キャッシュを素通りさせる（cache: 'reload'）。
+// GitHub Pages は max-age=600 を返すので、既定のまま取ると新しい版の SW が
+// ブラウザの HTTP キャッシュに残った**古いファイル**で自分のキャッシュを埋め、
+// 版番号だけ新しくて中身は旧版（または新旧混在）という状態が再現する
+// （ローカルで実際に再現した: v16 の SW のキャッシュに v15 の app.js が入る）。
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      .then((cache) => cache.addAll(SHELL.map((url) => new Request(url, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
   );
 });
 

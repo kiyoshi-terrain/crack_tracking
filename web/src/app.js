@@ -1173,14 +1173,26 @@ function escapeHtml(s) {
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', async () => {
     try {
-      const reg = await navigator.serviceWorker.register('./sw.js');
-      reg.update().catch(() => {});
-      // 新しい版が制御を取ったら一度だけ再読み込みして、混在状態を作らない
+      // 初回（まだ誰も制御していない）はネットワークから読んだ最新なので再読み込み不要。
+      // 制御が**入れ替わった**とき＝新しい版が入ったときだけ再読み込みする。
+      // 以前は「再読み込み済みの版」を sessionStorage に版番号で記録していたが、
+      // 記録するのは古い頁の版番号なので、次の更新時に同じ番号と一致して
+      // 再読み込みされず、新版が入っているのに古い画面のままになっていた
+      const hadController = !!navigator.serviceWorker.controller;
+      let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (sessionStorage.getItem('sw-reloaded') === APP_VERSION) return;
-        sessionStorage.setItem('sw-reloaded', APP_VERSION);
+        if (!hadController || refreshing) return;
+        // 万一 SW の更新が毎回走る環境でも無限に回らないよう、直近の自動再読み込みから
+        // 10 秒以内はもう一度はしない
+        let last = 0;
+        try { last = Number(sessionStorage.getItem('sw-reloaded-at')) || 0; } catch { /* 記憶なし */ }
+        if (Date.now() - last < 10000) return;
+        refreshing = true;
+        try { sessionStorage.setItem('sw-reloaded-at', String(Date.now())); } catch { /* 記憶できないだけ */ }
         location.reload();
       });
+      const reg = await navigator.serviceWorker.register('./sw.js');
+      reg.update().catch(() => {});
     } catch { /* SW が使えない環境ではそのまま動く */ }
   });
 }
