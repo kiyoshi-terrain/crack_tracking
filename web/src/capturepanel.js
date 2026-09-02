@@ -167,10 +167,23 @@ export async function switchLens(deviceId) {
  */
 async function calibrateLensFactor(deviceId, wideFrame) {
   setLiveStatus('レンズの倍率を実測中… そのまま向けていてください', 'info');
-  await new Promise((r) => setTimeout(r, 900));
+  // 新しいストリームの最初のフレームが来るまで待つ（iOS は 1 秒以上かかることがある）。
+  // 待たずに掴むと空フレームで黙って諦め、倍率が永遠に付かない
+  const deadline = Date.now() + 5000;
+  while ((!video || video.videoWidth === 0 || video.readyState < 2) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await new Promise((r) => setTimeout(r, 700));   // 露出・フォーカスが落ち着くぶん
   if (activeDeviceId !== deviceId || !video) return;
-  const now = grabSmall(SMALL_WIDTH)?.gray;
-  if (!now) return;
+  let now = null;
+  for (let i = 0; i < 3 && !now; i += 1) {
+    now = grabSmall(SMALL_WIDTH)?.gray ?? null;
+    if (!now) await new Promise((r) => setTimeout(r, 300));
+  }
+  if (!now) {
+    setLiveStatus('映像が来ないため倍率を測れませんでした。広角に戻してもう一度切り替えてください', 'warn');
+    return;
+  }
   const est = estimateLensRatio(wideFrame, now);
   if (!est) {
     setLiveStatus('倍率を実測できませんでした（模様が足りないか、壁がずれました）。広角に戻してもう一度切り替えてください', 'warn');
@@ -181,6 +194,13 @@ async function calibrateLensFactor(deviceId, wideFrame) {
   const name = lenses.find((l) => l.deviceId === deviceId)?.kind === 'tele' ? '望遠' : '超広角';
   setLiveStatus(`${name}の倍率を実測: ${lensFactors[deviceId].toFixed(2)}×（広角比・相関 ${est.zncc.toFixed(2)}）`, 'good');
   deps.onStateChange?.();
+}
+
+/** 指定レンズの実測倍率（広角比）。未実測なら null。 */
+export function lensFactorOf(deviceId) {
+  const kind = lenses.find((l) => l.deviceId === deviceId)?.kind;
+  if (kind === 'wide') return 1;
+  return lensFactors[deviceId] ?? null;
 }
 
 /** 実測した倍率を捨てて測り直す（レンズを付け替えた・別端末で復元したとき）。 */

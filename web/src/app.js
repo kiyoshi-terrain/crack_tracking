@@ -19,7 +19,7 @@ import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparep
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 import {
   initCapturePanel, toggleLive, liveActive, sessionActive,
-  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom,
+  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom, lensFactorOf,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
 
@@ -287,19 +287,30 @@ function renderLensBar() {
   if (!liveActive()) { bar.innerHTML = ''; bar.classList.add('hidden'); return; }
   const ls = lensState();
   const names = { ultra: '超広角', wide: '広角', tele: '望遠' };
+  const fmt = (f) => (f < 1 ? f.toFixed(1) : (Math.round(f * 10) / 10).toString().replace(/\.0$/, '')) + '×';
   const seen = {};
   const items = ls.lenses.map((l) => {
     seen[l.kind] = (seen[l.kind] ?? 0) + 1;
-    const label = seen[l.kind] > 1 ? `${names[l.kind]} ${seen[l.kind]}` : names[l.kind];
-    const f = l.kind === 'wide' ? 1 : (l.deviceId === ls.activeDeviceId ? ls.factor : null);
-    const sub = f != null && l.kind !== 'wide' ? `<small>${f.toFixed(1)}×</small>` : '';
-    return `<button class="lens${l.deviceId === ls.activeDeviceId ? ' on' : ''}" data-lens="${l.deviceId}">${label}${sub}</button>`;
+    const active = l.deviceId === ls.activeDeviceId;
+    // ラベルは倍率で統一する。広角は 1×、他は実測値。未実測ならレンズ名で出し、
+    // 押せば測ることを小さく添える
+    const factor = l.kind === 'wide' ? 1 : (active ? ls.factor : lensFactorOf(l.deviceId));
+    let label = factor != null ? fmt(factor) : names[l.kind];
+    if (seen[l.kind] > 1) label += ` ${seen[l.kind]}`;
+    const sub = factor == null ? '<small>押すと実測</small>' : '';
+    return `<button class="lens${active ? ' on' : ''}" data-lens="${l.deviceId}">${label}${sub}</button>`;
   });
-  if (ls.zoom) {
-    const steps = [1, 2].filter((z) => z <= ls.zoom.max);
-    for (const z of steps) {
+  // デジタル 2× は広角のときだけ（48MP 機のセンサークロップに限り実質的に効く）。
+  // 望遠のときにズームのピルを出すと「1×」が点いたままになり、倍率を誤読させる
+  if (ls.zoom && ls.activeKind === 'wide') {
+    const z = 2;
+    if (z <= ls.zoom.max) {
       const on = Math.abs((ls.zoom.value || 1) - z) < 0.05;
-      items.push(`<button class="lens zoom${on ? ' on' : ''}" data-zoom="${z}">${z}×${z > 1 ? '<small>デジタル</small>' : ''}</button>`);
+      const wideIdx = items.findIndex((_, i) => ls.lenses[i].kind === 'wide');
+      const pill = `<button class="lens zoom${on ? ' on' : ''}" data-zoom="${on ? 1 : z}">2×<small>デジタル</small></button>`;
+      items.splice(wideIdx + 1, 0, pill);
+      // ズーム中は広角のピルの点灯を外す（点いたままだと「1×」に見える）
+      if (on) items[wideIdx] = items[wideIdx].replace(' on"', '"');
     }
   }
   if (items.length <= 1) { bar.innerHTML = ''; bar.classList.add('hidden'); return; }
