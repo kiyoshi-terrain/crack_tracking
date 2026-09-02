@@ -12,7 +12,7 @@
 
 import {
   parsePointCloud, decimate, estimateUnitScaleToMM,
-  fitWallPlane, outOfPlaneMap, findBulges, bounds,
+  fitWallPlane, outOfPlaneMap, findBulges, bounds, placeViewpoint,
 } from './pointcloud.js';
 import { cameraFromPlane, pixelScale, frameScaleSummary } from './surface.js';
 
@@ -50,6 +50,11 @@ export function initCloudPanel(options = {}) {
     if (cloudState.plane) recompute();
   });
   $('cloudCell').addEventListener('input', () => { if (cloudState.plane) recompute(); });
+  $('cloudDistance').addEventListener('input', () => { if (cloudState.plane) recompute(); });
+  $('cloudDistanceClear').addEventListener('click', () => {
+    $('cloudDistance').value = '';
+    if (cloudState.plane) recompute();
+  });
   $('cloudClear').addEventListener('click', clearCloud);
 }
 
@@ -106,12 +111,19 @@ function recompute() {
 
   const up = $('cloudUp').value === 'y' ? [0, 1, 0] : [0, 0, 1];
 
-  // 視点は原点。Scaniverse の座標原点はスキャン開始地点なので、
+  // 既定の視点は点群の原点。Scaniverse の座標原点はスキャン開始地点なので、
   // 「スキャンを始めた場所から写真を撮る」手順を前提にしている。
-  const plane = fitWallPlane(points, { viewpoint: [0, 0, 0] });
+  // LiDAR は 3m しか届かないので高所ではその手順が守れない。撮影距離が
+  // 入力されていれば、視点を「面から正対でその距離」に置き直す
+  let plane = fitWallPlane(points, { viewpoint: [0, 0, 0] });
+  const centroid = centroidOf(points);
+  const distanceM = parseFloat($('cloudDistance').value);
+  if (distanceM > 0) {
+    plane = placeViewpoint(plane, centroid, (distanceM * 1000) / cloudState.unit.scale);
+  }
   cloudState.plane = plane;
-  cloudState.centroid = centroidOf(points);
-  cloudState.camera = cameraFromPlane(plane, cloudState.centroid, { worldUp: up });
+  cloudState.centroid = centroid;
+  cloudState.camera = cameraFromPlane(plane, centroid, { worldUp: up });
 
   // セルの大きさは mm 指定。大谷石は 1個 300〜900mm なので、その 1/6 前後が既定
   const cellMM = Math.max(5, parseFloat($('cloudCell').value) || 50);
@@ -160,7 +172,8 @@ function renderSummary() {
 
   const cells = [
     ['点数', `${fmtInt(cloudState.rawCount)}${cloudState.rawCount > cloudState.points.length / 3 ? ` → ${fmtInt(cloudState.points.length / 3)}` : ''}`, '間引き後'],
-    ['撮影距離', `${(plane.viewpointDistance * toMM / 1000).toFixed(2)} m`, '視点から面まで'],
+    ['撮影距離', `${(plane.viewpointDistance * toMM / 1000).toFixed(2)} m`,
+      plane.viewpointSource === 'manual' ? '手入力' : 'スキャン原点から'],
     ['面の粗さ', `${(plane.rms * toMM).toFixed(1)} mm`, '平面からの RMS'],
     ['採用点', `${(plane.inlierRatio * 100).toFixed(0)} %`, '植生などを除外'],
   ];
@@ -184,6 +197,15 @@ function renderSummary() {
   if (scale && scale.variation > 1.3) {
     warn += banner('warn', '画面内でスケールが一定でありません',
       `端と中央で ${scale.variation.toFixed(1)} 倍違います。き裂は画面中央付近に入れて撮ってください。`);
+  }
+  // 近接スキャン × 遠方撮影を黙って通さない。これを外すと mm/px が桁で狂う
+  if (plane.viewpointSource !== 'manual') {
+    warn += banner('warn', '視点はスキャンの原点だと仮定しています',
+      `撮影距離 ${(plane.viewpointDistance * toMM / 1000).toFixed(2)}m は`
+      + '「スキャンを開始した場所から写真を撮った」前提の値です。'
+      + '<b>近づいてスキャンし、離れて撮ったなら実際の距離を入れてください。</b>'
+      + '合成検証では、1m でスキャンして 5m から撮った場合に mm/px が 5倍ずれ、'
+      + '視差補正が無効になりました（それでも画面には「補正しました」と出ます）。');
   }
   if (plane.inlierRatio < 0.6) {
     warn += banner('warn', '平面に乗らない点が多い',

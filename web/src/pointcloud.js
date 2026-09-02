@@ -592,6 +592,39 @@ export function decimate(points, maxPoints) {
 }
 
 /**
+ * 視点を「面から指定した距離だけ手前」に置き直す。
+ *
+ * 既定では点群の原点を視点とみなしている（＝スキャンを開始した場所から写真を
+ * 撮った、という手順の前提）。ところが LiDAR の実用距離は 3m 程度しかないので、
+ * 高所・遠方の壁では**近づいてスキャンし、離れて撮る**ことになる。すると前提が
+ * 崩れ、しかも**黙って崩れる**。
+ *
+ * 合成検証（距離 5m、1m の位置からスキャン）:
+ *   mm/px 1.40（真値 7.14）・距離 0.98m（真値 5.00）
+ *   視差補正は偽陽性 12→11 とほぼ無効化。画面には「ずれ 0cm を補正」と出る
+ *
+ * 効いているのは**奥行きの誤り**だけで、横方向には強い。同じ検証で、視点が
+ * 横に 1m ずれていても（視線が 11° 傾く）補正は効いた（偽陽性 0/47・推定 173mm）。
+ * だから「正対で、この距離」と置くだけで実用になる。歩測で足りる。
+ *
+ * @param {object} plane fitWallPlane の戻り値
+ * @param {number[]} lookAt 見ている場所（点群の重心を渡す）
+ * @param {number} distance 面から視点までの距離（点群と同じ単位）
+ */
+export function placeViewpoint(plane, lookAt, distance) {
+  const n = plane.normal;
+  // 重心はほぼ面上にあるが厳密ではないので、いったん面へ落としてから離す。
+  // そうしないと「面からの距離」が重心の残差ぶんずれる
+  const s = signedDistance(plane, lookAt[0], lookAt[1], lookAt[2]);
+  const eye = [
+    lookAt[0] + n[0] * (distance - s),
+    lookAt[1] + n[1] * (distance - s),
+    lookAt[2] + n[2] * (distance - s),
+  ];
+  return { ...plane, viewpoint: eye, viewpointDistance: distance, viewpointSource: 'manual' };
+}
+
+/**
  * 面外マップを世界座標で読む。
  *
  * 写真の画素から飛ばした光線が平面に当たった点で「そこは面からどれだけ

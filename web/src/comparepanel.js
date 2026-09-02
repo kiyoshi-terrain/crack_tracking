@@ -269,7 +269,13 @@ function render(result, grayA, context) {
   // 立ち位置のずれが作る「見かけの変位」。点群があるときだけ扱える。
   // 効かせられなかったときも黙らない — 未補正と補正済みは違う
   const px = result.parallax;
-  if (px?.ok && px.applied) {
+  if (px?.ok && px.ineffective) {
+    verdict += `<div class="banner warn"><div><b>視差はほとんど減りませんでした</b><br>`
+      + `補正を当てても場の大きさが ${(px.reduction * 100).toFixed(0)}% しか変わっていません。`
+      + `点群と写真の位置合わせが取れていない可能性が高いです。`
+      + `<b>点群シートの「撮影距離」に、写真を撮った位置から壁までの距離を入れてください。</b>`
+      + `近づいてスキャンして離れて撮ると、既定の視点（スキャン原点）が実際とかけ離れます。</div></div>`;
+  } else if (px?.ok && px.applied) {
     const cm = px.shiftMagnitudeMM / 10;
     verdict += `<div class="banner good"><div><b>立ち位置のずれを補正しました</b><br>`
       + `点群の凹凸から、前回との立ち位置の差を <b>${cm.toFixed(0)}cm</b> と推定し`

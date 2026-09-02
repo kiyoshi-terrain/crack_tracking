@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v27">
+<html lang="ja" data-version="v28">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -733,7 +733,23 @@
             <input type="number" id="cloudCell" value="50" min="5" max="500" step="5" inputmode="numeric">
           </div>
         </div>
+        <div class="row">
+          <div>
+            <label>撮影距離（m）</label>
+            <input type="number" id="cloudDistance" placeholder="スキャン原点から" min="0.3" max="200" step="0.1" inputmode="decimal">
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button type="button" class="ghost" id="cloudDistanceClear">スキャン原点に戻す</button>
+          </div>
+        </div>
         <p class="note">上方向は面外マップの向きにだけ効きます。外しても測定値は変わりません。</p>
+        <p class="note"><b>撮影距離は、写真を撮った位置から壁までの距離です。</b>
+          空欄だとスキャンの原点を写真の視点とみなします（＝スキャン開始位置から撮った前提）。
+          近づいてスキャンし、離れて撮ったなら<b>必ず入れてください</b>。
+          合成検証では、1m でスキャンして 5m から撮った場合に mm/px が 5倍ずれ、視差補正が
+          まったく効かなくなりました。歩測でも構いません（横方向のずれには強く、
+          1m 横にずれた視点でも視差補正は効いています）。</p>
       </div>
 
       <div id="cloudSummary" style="margin-top:12px"></div>

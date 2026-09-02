@@ -404,15 +404,23 @@ export function correctParallax(cells, geo, options = {}) {
     after += c.du * c.du + c.dv * c.dv;
   }
 
+  const beforeRms = n ? Math.sqrt(before / n) : null;
+  const afterRms = n ? Math.sqrt(after / n) : null;
+  // 引いたのに場が減っていないなら、それは補正ではなく無効化。
+  // 点群と写真の位置合わせが取れていないとこうなる（撮影距離の入れ忘れ）
+  const reduction = beforeRms > 0 && afterRms != null ? 1 - afterRms / beforeRms : 0;
+
   return {
     ok: true,
     applied: corrected > 0,
+    reduction,
+    ineffective: corrected > 0 && reduction < 0.1,
     shiftMM: fit.shiftMM,
     shiftMagnitudeMM: fit.shiftMagnitudeMM,
     usedCells: fit.usedCells,
     corrected,
     residualPx: fit.residualPx,
-    beforeRmsPx: n ? Math.sqrt(before / n) : null,
-    afterRmsPx: n ? Math.sqrt(after / n) : null,
+    beforeRmsPx: beforeRms,
+    afterRmsPx: afterRms,
   };
 }
