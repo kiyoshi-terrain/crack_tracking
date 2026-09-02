@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>室内検証パターン — 既知量を画面でずらす</title>
+<style>
+  :root {
+    --ground: #10131a; --panel: #171b22; --ink: #e8ecf1; --ink-soft: #a9b4c0;
+    --ink-dim: #6d7783; --line: rgba(255,255,255,.09); --amber: #d99a2b; --good: #5ec48a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .mono { font-family: SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 18px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+       color: var(--ink-soft); margin: 26px 0 10px; font-weight: 600; }
+  p { margin: 0 0 12px; color: var(--ink-soft); }
+  ol { margin: 0 0 12px; padding-left: 22px; color: var(--ink-soft); }
+  li { margin-bottom: 7px; }
+  b { color: var(--ink); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: var(--ink-soft); margin-bottom: 5px; }
+  input[type=number] {
+    width: 100%; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line);
+    background: #0c0f14; color: var(--ink); font: inherit; font-family: SFMono-Regular, Menlo, monospace;
+  }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  button {
+    -webkit-appearance: none; appearance: none; border: 1px solid var(--line); border-radius: 10px;
+    background: #222833; color: var(--ink); font: inherit; padding: 10px 14px; cursor: pointer;
+  }
+  button.primary { background: var(--amber); color: #111; border-color: transparent; font-weight: 700; }
+  button.on { background: var(--amber); color: #111; border-color: transparent; font-weight: 700; }
+  .steps { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .readout { font-family: SFMono-Regular, Menlo, monospace; font-size: 26px; font-variant-numeric: tabular-nums; }
+  .note { font-size: 12.5px; color: var(--ink-dim); }
+  a { color: var(--amber); }
+
+  /* ── 撮影モード: 画面いっぱいにパターンを出す ───────────────── */
+  body.shooting .wrap { display: none; }
+  #stage { display: none; }
+  body.shooting #stage {
+    display: block; position: fixed; inset: 0; background: #000;
+  }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #hud {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px;
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-radius: 999px; background: rgba(0,0,0,.72); border: 1px solid rgba(255,255,255,.14);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    font-family: SFMono-Regular, Menlo, monospace; font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  #hud b { color: var(--amber); font-size: 15px; }
+  #hud button { padding: 5px 10px; font-size: 12px; }
+  body:not(.shooting) #hud { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>室内検証パターン</h1>
+  <p>ディスプレイを<b>変位ステージ</b>として使います。画面の画素ピッチは一定なので、
+     模様を既知量だけずらして表示し、その前後を撮れば<b>真値のわかる 2 時期</b>が作れます。
+     プリンタもすきまゲージも要りません。</p>
+
+  <h2>1. 画面の実寸を合わせる</h2>
+  <div class="card">
+    <p class="note">下の帯を定規で測り、実測値を入れてください。これで 1px が何 mm かが決まります。
+       ブラウザの拡大率を変えたら測り直してください。</p>
+    <div id="bar" style="height:26px;background:linear-gradient(90deg,#fff 0 50%,#888 50% 100%);border-radius:3px;margin:10px 0 4px"></div>
+    <div class="note mono" id="barPx" style="margin-bottom:12px">—</div>
+    <div class="row">
+      <div>
+        <label>帯の実測長さ（mm）</label>
+        <input type="number" id="barMM" step="0.5" inputmode="decimal" placeholder="定規で測った値">
+      </div>
+      <div>
+        <label>1px あたり（mm/px）</label>
+        <input type="number" id="pitch" step="0.0001" inputmode="decimal" readonly>
+      </div>
+    </div>
+  </div>
+
+  <h2>2. ずらす量を決めて撮る</h2>
+  <div class="card">
+    <p class="note">上半分が<b>固定側</b>、下半分が<b>可動側</b>です。固定側はカメラの動きを差し引く剛体基準になり、
+       可動側だけが指定量ずれます。ずらす量は 1px 未満でも構いません（サブピクセルで描きます）。</p>
+    <div class="row">
+      <div>
+        <label>ずらす量（mm）</label>
+        <input type="number" id="shiftMM" step="0.01" inputmode="decimal" value="0">
+      </div>
+      <div>
+        <label>模様の粗さ（画面 px）</label>
+        <input type="number" id="grain" step="1" inputmode="numeric" value="10">
+      </div>
+    </div>
+    <div class="steps">
+      <button data-step="0">0</button>
+      <button data-step="0.05">0.05</button>
+      <button data-step="0.1">0.10</button>
+      <button data-step="0.2">0.20</button>
+      <button data-step="0.5">0.50</button>
+      <button data-step="1">1.00 mm</button>
+    </div>
+    <div class="steps" style="margin-top:12px">
+      <button class="primary" id="shoot">全画面に出す</button>
+    </div>
+  </div>
+
+  <h2>3. 手順</h2>
+  <ol>
+    <li>この画面を<b>ノートPCや外部モニタ</b>に出し、明るさを固定する（自動調光を切る）</li>
+    <li>スマホを<b>三脚か台に固定</b>し、画面から 0.5〜1.5m。パターンが画面いっぱいに写る距離で</li>
+    <li>ずらす量 <span class="mono">0</span> のまま、σ実測ツールで<b>基準セット</b>を撮る（σ が収束するまで自動）</li>
+    <li>結果シートで「基準として保存」</li>
+    <li>ずらす量を <span class="mono">0.20</span> などに変え、<b>カメラは一切動かさず</b>もう一度撮る</li>
+    <li>比較シートで基準と今回を比べる。<b>可動側だけ</b>に指定量が出れば正解</li>
+  </ol>
+  <p class="note">スケールは「既知の基準距離」を使うのが確実です。上の帯の実測値をそのまま使えます。</p>
+
+  <h2>気をつけること</h2>
+  <ul class="note" style="padding-left:22px">
+    <li>模様が細かすぎると画面の画素格子とカメラでモアレが出ます。粗さは 8〜14px を目安に、
+        撮った画で縞が見えたら粗くしてください</li>
+    <li>画面の自動調光・True Tone が動くと露出が変わります。切ってください</li>
+    <li>画面は発光体なので、実際の壁より模様のコントラストが高く出ます。<b>ここで出る σ は
+        現場の σ より良い値</b>になります。計測系が正しく動くかの確認であって、現場の検出限界の代用にはなりません</li>
+  </ul>
+  <p><a href="../">σ実測ツールへ戻る</a>　<a href="../manual/">取扱説明書</a>　<a href="../targets/">印刷用ターゲットシート</a></p>
+</div>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="hud">
+  <span>ずれ</span><b id="hudShift">0.00</b><span>mm</span>
+  <button id="minus">−</button><button id="plus">＋</button>
+  <button id="exit">戻る</button>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const cv = $('cv');
+const ctx = cv.getContext('2d');
+
+// 画面の実寸合わせ。CSS の mm はブラウザが 96dpi と決め打ちするので当てにならない。
+// 実際に描いた帯を定規で測ってもらうのが一番確か（印刷シートと同じ考え方）
+function barWidthPx() { return $('bar').getBoundingClientRect().width; }
+function pitchMM() {
+  const mm = parseFloat($('barMM').value);
+  const px = barWidthPx();
+  return mm > 0 && px > 0 ? mm / px : null;
+}
+function refreshPitch() {
+  $('barPx').textContent = `帯の幅 ${barWidthPx().toFixed(1)} px（CSS px）`;
+  const p = pitchMM();
+  $('pitch').value = p ? p.toFixed(4) : '';
+  try { if (p) localStorage.setItem('testpattern-bar-mm', $('barMM').value); } catch {}
+}
+try {
+  const saved = localStorage.getItem('testpattern-bar-mm');
+  if (saved) $('barMM').value = saved;
+} catch {}
+$('barMM').addEventListener('input', refreshPitch);
+window.addEventListener('resize', refreshPitch);
+refreshPitch();
+
+$('shiftMM').addEventListener('input', draw);
+$('grain').addEventListener('input', () => { pattern = null; draw(); });
+for (const b of document.querySelectorAll('[data-step]')) {
+  b.addEventListener('click', () => { $('shiftMM').value = b.dataset.step; draw(); });
+}
+
+// 模様は一度だけ作って使い回す。描き直すたびに変わると2時期の比較にならない
+let pattern = null;
+function buildPattern(w, h, grain) {
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const c = off.getContext('2d');
+  c.fillStyle = '#7a7a7a';
+  c.fillRect(0, 0, w, h);
+  // 決まった種の乱数。毎回同じ模様になるようにする
+  let seed = 20260902;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const count = Math.round((w * h) / (grain * grain) * 0.55);
+  for (let i = 0; i < count; i += 1) {
+    const r = grain * (0.35 + rnd() * 0.5);
+    const v = rnd() < 0.5 ? 18 : 238;
+    c.beginPath();
+    c.arc(rnd() * w, rnd() * h, r, 0, Math.PI * 2);
+    c.fillStyle = `rgb(${v},${v},${v})`;
+    c.fill();
+  }
+  return off;
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(window.innerWidth * dpr);
+  const h = Math.round(window.innerHeight * dpr);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; pattern = null; }
+  const grain = Math.max(3, Math.min(40, parseInt($('grain').value, 10) || 10)) * dpr;
+  if (!pattern) pattern = buildPattern(w, h, grain);
+
+  const p = pitchMM();                       // CSS px あたりの mm
+  const mm = parseFloat($('shiftMM').value) || 0;
+  // ずらす量[mm] → デバイス px。実寸合わせ前は 1mm = 10px の仮の目盛りで動かす
+  const shiftPx = p ? (mm / p) * dpr : mm * 10 * dpr;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
+  const half = Math.round(h / 2);
+  const gap = Math.round(6 * dpr);           // 「き裂」の隙間
+
+  // 固定側（上）— 一切動かさない。カメラの動きはここから差し引かれる
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, w, half - gap); ctx.clip();
+  ctx.drawImage(pattern, 0, 0);
+  ctx.restore();
+
+  // 可動側（下）— 指定量だけ水平にずらす。整数 px に丸めない（サブピクセルで描く）
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, half + gap, w, h - half - gap); ctx.clip();
+  ctx.translate(shiftPx, 0);
+  ctx.drawImage(pattern, 0, 0);
+  ctx.restore();
+
+  $('hudShift').textContent = mm.toFixed(2);
+}
+
+function nudge(d) {
+  const v = (parseFloat($('shiftMM').value) || 0) + d;
+  $('shiftMM').value = Math.round(v * 100) / 100;
+  draw();
+}
+$('plus').addEventListener('click', () => nudge(0.05));
+$('minus').addEventListener('click', () => nudge(-0.05));
+$('shoot').addEventListener('click', async () => {
+  document.body.classList.add('shooting');
+  try { await document.documentElement.requestFullscreen?.(); } catch {}
+  draw();
+});
+$('exit').addEventListener('click', async () => {
+  try { await document.exitFullscreen?.(); } catch {}
+  document.body.classList.remove('shooting');
+});
+window.addEventListener('resize', draw);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') nudge(0.05);
+  if (e.key === 'ArrowLeft') nudge(-0.05);
+  if (e.key === 'Escape') $('exit').click();
+});
+draw();
+</script>
+</body>
+</html>
