@@ -246,6 +246,10 @@ console.log('\n== サービスワーカー ==');
   const missing = modules.filter((m) => !sw.includes(`'./src/${m}'`));
   check('src/ の全モジュールがキャッシュ対象', missing.length === 0,
     missing.length ? `漏れ: ${missing.join(', ')}` : `${modules.length} 本`);
+  // 版番号は sw.js の CACHE と version.js の2箇所にある。ずれると画面の版表示が嘘になる
+  const ver = readFileSync(new URL('../src/version.js', import.meta.url), 'utf8').match(/'v(\d+)'/)?.[1];
+  const cacheVer = sw.match(/sigma-tool-v(\d+)/)?.[1];
+  check('版番号が sw.js と version.js で一致', ver && ver === cacheVer, `version.js v${ver} / sw.js v${cacheVer}`);
 }
 
 console.log(`\n${passed} 件成功 / ${failed} 件失敗`);

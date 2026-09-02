@@ -75,7 +75,7 @@ web/
     historypanel.js   経時管理パネルのUI
     shell.js          カメラ風シェル（HUD・レール・シート）
     exif.js / image.js
-  test/run.mjs        合成データによる検証（229件）
+  test/run.mjs        合成データによる検証（230件）
 
 Sources/CrackCore/    Swift の計測ロジック
 App/CrackScan/        iOS アプリ
@@ -167,7 +167,7 @@ docs/accuracy.md      精度の根拠と限界（実運用前に必読）
 ## 開発・実行
 ```bash
 cd web && python3 -m http.server 8080   # σ実測ツール
-cd web && node test/run.mjs             # 検証 229件
+cd web && node test/run.mjs             # 検証 230件
 swift test                              # CrackCore 検証
 xcodegen generate                       # iOS アプリの Xcode プロジェクト生成
 ```

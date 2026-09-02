@@ -496,6 +496,7 @@
         ◉ で起こすか、右の「写真」から読み込んでください。<br>
         点群だけでも面外のはらみ出しは測れます。<br>
         <a href="./manual/" style="pointer-events:auto">取扱説明書を開く</a>
+        <span class="mono" style="display:block;margin-top:10px;font-size:10px;color:var(--ink-dim)">版 <span id="appVersion">—</span></span>
       </div>
     </div>
     <div id="vfBadge" class="hidden">基準画像</div>
@@ -570,6 +571,16 @@
       <div id="thumbs" class="thumbs"></div>
       <div id="fileWarnings" style="margin-top:12px"></div>
       <div id="quickCheck"></div>
+
+      <details class="advanced" style="margin-top:14px">
+        <summary>診断情報（うまく動かないとき）</summary>
+        <pre id="diagBody" class="mono" style="white-space:pre-wrap;font-size:11px;line-height:1.5;user-select:text;-webkit-user-select:text;background:rgba(0,0,0,.4);padding:10px;border-radius:8px"></pre>
+        <div class="btn-row">
+          <button id="diagRefresh">更新</button>
+          <button id="diagCopy">コピー</button>
+        </div>
+        <p class="note">貼り付けて送ってもらえれば、その内容から原因を特定します。</p>
+      </details>
     </div>
   </section>
   <section class="sheet" role="dialog" aria-modal="true" tabindex="-1" id="step2">

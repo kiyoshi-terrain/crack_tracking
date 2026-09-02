@@ -22,6 +22,7 @@ import {
   startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom, lensFactorOf,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
+import { APP_VERSION } from './version.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -598,6 +599,49 @@ for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
 initShell();
 updateSteps();
 
+// ── 版とエラーを画面に出す。iPhone には開発者ツールが無いので、黙って死ぬのが最悪
+$('appVersion').textContent = APP_VERSION;
+const diagLog = [];
+function noteError(kind, message) {
+  const line = `${new Date().toISOString().slice(11, 19)} ${kind}: ${message}`;
+  diagLog.push(line);
+  if (diagLog.length > 8) diagLog.shift();
+  setViewfinderHint(`エラー: ${String(message).slice(0, 120)}`, 'bad');
+  renderDiagnostics();
+}
+window.addEventListener('error', (e) => noteError('error', e.message || e.type));
+window.addEventListener('unhandledrejection', (e) => noteError('promise', e.reason?.message ?? String(e.reason)));
+
+function renderDiagnostics() {
+  const el = $('diagBody');
+  if (!el) return;
+  const ls = liveActive() ? lensState() : null;
+  const lines = [
+    `版 ${APP_VERSION}`,
+    `UA ${navigator.userAgent}`,
+    `画面 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio}`,
+    `ライブ ${liveActive() ? 'on' : 'off'}`,
+    ...(ls ? [
+      `レンズ ${ls.lenses.length}: ${ls.lenses.map((l) => `${l.kind}「${l.label || '(無名)'}」${lensFactorOf(l.deviceId) ?? '未実測'}×`).join(' / ')}`,
+      `使用中 ${ls.activeKind} 倍率 ${ls.factor ?? '未実測'} ズーム ${ls.zoom ? `${ls.zoom.value} (最大 ${ls.zoom.max})` : '非対応'}`,
+      `映像 ${document.getElementById('liveVideo')?.videoWidth ?? 0}×${document.getElementById('liveVideo')?.videoHeight ?? 0}`,
+    ] : []),
+    `写真 ${state.files.length} 枚 / 焦点距離 ${effectiveFocal35() ?? '—'} / GSD ${currentGSD()?.toFixed(4) ?? '—'}`,
+    ...(diagLog.length ? ['直近のエラー:', ...diagLog] : ['エラーなし']),
+  ];
+  el.textContent = lines.join('\n');
+}
+$('diagRefresh').addEventListener('click', renderDiagnostics);
+$('diagCopy').addEventListener('click', async () => {
+  renderDiagnostics();
+  try {
+    await navigator.clipboard.writeText($('diagBody').textContent);
+    $('diagCopy').textContent = 'コピーしました';
+    setTimeout(() => { $('diagCopy').textContent = 'コピー'; }, 1500);
+  } catch { $('diagCopy').textContent = '長押しで選択してコピー'; }
+});
+renderDiagnostics();
+
 // カメラアプリなので起動＝ファインダー。許可が無い・カメラが無い端末では
 // 黙って従来の空画面に落ち、◉ から手で起こせる
 async function autoStartLive() {
@@ -1127,5 +1171,16 @@ function escapeHtml(s) {
 
 // 現場は圏外が普通なので、一度開けば通信なしで使えるようにする。
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('./sw.js');
+      reg.update().catch(() => {});
+      // 新しい版が制御を取ったら一度だけ再読み込みして、混在状態を作らない
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (sessionStorage.getItem('sw-reloaded') === APP_VERSION) return;
+        sessionStorage.setItem('sw-reloaded', APP_VERSION);
+        location.reload();
+      });
+    } catch { /* SW が使えない環境ではそのまま動く */ }
+  });
 }

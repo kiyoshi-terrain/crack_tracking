@@ -6,7 +6,7 @@
 //
 // 更新方法: ファイルを変えたら CACHE の版を上げる。
 
-const CACHE = 'sigma-tool-v14';
+const CACHE = 'sigma-tool-v15';
 
 // src/ 配下のモジュールは**全部**並べること。1本でも漏れると、
 // 圏外でその機能だけ静かに動かなくなる（targets.js が実際に漏れていた）。
@@ -39,6 +39,7 @@ const SHELL = [
   './src/clouddiffpanel.js',
   './src/history.js',
   './src/historypanel.js',
+  './src/version.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -56,24 +57,27 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// stale-while-revalidate: まずキャッシュを返して即座に開き、
-// 裏で取り直して次回に反映する。オフラインでも開き、更新も取りこぼさない。
+// シェル（アプリ本体）は**版のキャッシュからだけ**返す。ファイル単位で裏から取り直すと、
+// 「新しい app.js ＋ 古い capturepanel.js」のような混在が起き、新しい import が
+// 古いモジュールに無くて起動時に即死する（実機で実際に起きた）。
+// 更新は新しい sw.js（CACHE の版が違う）の install で一式を取り直し、activate で
+// 旧キャッシュを消す。ページ側は controllerchange を受けて一度だけ再読み込みする。
+// シェル以外（画像など）はネットワーク優先・失敗時キャッシュ。
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
+    caches.open(CACHE).then(async (cache) => {
+      const cached = await cache.match(request, { ignoreSearch: true });
+      if (cached) return cached;
+      try {
+        const response = await fetch(request);
+        if (response && response.ok) cache.put(request, response.clone());
+        return response;
+      } catch {
+        return (await caches.match(request)) || Response.error();
+      }
     })
   );
 });
