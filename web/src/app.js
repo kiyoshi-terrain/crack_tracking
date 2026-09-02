@@ -224,8 +224,8 @@ function nextAction() {
   if (n === 0) return null;                       // 空状態の案内は vf-empty が出している
   if (n === 1) return 'あと1枚以上撮ると σ が出ます';
   if (state.measurement) return null;
-  if (state.lensMultiplier?.kind === 'tele' && state.lensMultiplier.factor == null) {
-    return '望遠レンズで撮りました。スケールシートで望遠の倍率を入れると mm で出ます';
+  if (state.lensMultiplier && state.lensMultiplier.kind !== 'wide' && state.lensMultiplier.factor == null) {
+    return 'このレンズの倍率が未実測です。広角に戻してからもう一度切り替えると自動で測ります（望遠は手入力も可）';
   }
   if (currentGSD() == null) return 'スケールを決めると mm で出ます（未入力でも px では出ます）';
   return 'σ を押すと実測します';
@@ -291,7 +291,9 @@ function renderLensBar() {
   const items = ls.lenses.map((l) => {
     seen[l.kind] = (seen[l.kind] ?? 0) + 1;
     const label = seen[l.kind] > 1 ? `${names[l.kind]} ${seen[l.kind]}` : names[l.kind];
-    return `<button class="lens${l.deviceId === ls.activeDeviceId ? ' on' : ''}" data-lens="${l.deviceId}">${label}</button>`;
+    const f = l.kind === 'wide' ? 1 : (l.deviceId === ls.activeDeviceId ? ls.factor : null);
+    const sub = f != null && l.kind !== 'wide' ? `<small>${f.toFixed(1)}×</small>` : '';
+    return `<button class="lens${l.deviceId === ls.activeDeviceId ? ' on' : ''}" data-lens="${l.deviceId}">${label}${sub}</button>`;
   });
   if (ls.zoom) {
     const steps = [1, 2].filter((z) => z <= ls.zoom.max);
@@ -464,12 +466,14 @@ function effectiveFocal35() {
 function lensMultiplierNow() {
   const ls = lensState();
   const zoom = ls.zoom?.value || 1;
+  // 実測値（広角→切替時にアプリが測った比）を最優先。無ければ手入力（望遠のみ）
+  if (ls.factor != null) return { kind: ls.activeKind, factor: ls.factor, zoom, measured: ls.activeKind !== 'wide' };
   if (ls.activeKind === 'tele') {
     const f = parseFloat($('teleFactor').value);
-    return { kind: 'tele', factor: f > 0 ? f : null, zoom };
+    return { kind: 'tele', factor: f > 0 ? f : null, zoom, measured: false };
   }
-  if (ls.activeKind === 'ultra') return { kind: 'ultra', factor: 0.5, zoom };
-  return { kind: 'wide', factor: 1, zoom };
+  if (ls.activeKind === 'ultra') return { kind: 'ultra', factor: null, zoom, measured: false };
+  return { kind: 'wide', factor: 1, zoom, measured: false };
 }
 
 function updateGSD() {
