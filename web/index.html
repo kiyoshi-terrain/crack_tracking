@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v25">
+<html lang="ja" data-version="v26">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -656,6 +656,31 @@
           「2×」は広角センサーの切り出しなので、広角の値の 2 倍（48mm）として扱います。
           <button id="presetIphone16Pro" style="margin-top:8px">iPhone 16 Pro の値を入れる</button>
         </div></div>
+        <details class="advanced" style="grid-column:1/-1;margin:4px 0 10px">
+          <summary>レンズ校正（任意）</summary>
+          <p class="note">前回と立ち位置が違うと、レンズの歪みが偽の変位として残ります。
+            合成検証では、歪み 2% ＋ 姿勢差が中程度で <b>71 セル中 44 が偽陽性</b>になり、
+            校正を入れると <b>3 セル</b>（歪みが無い場合と同じ水準）に戻りました。
+            <b>同じ立ち位置に戻れているなら要りません</b>（その場合は歪み 2% でも偽陽性 0）。
+            戻り切れなかったときの保険です。</p>
+          <div class="row">
+            <div>
+              <label>校正するレンズ</label>
+              <select id="calibLens">
+                <option value="wide">広角 1×</option>
+                <option value="tele">望遠</option>
+                <option value="ultra">超広角</option>
+              </select>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="calibLoad">校正シートの写真を読み込む</button>
+            <button id="calibClear">この結果を捨てる</button>
+          </div>
+          <input type="file" id="calibInput" accept="image/*" multiple class="hidden">
+          <div id="calibStatus" style="margin-top:10px"></div>
+          <p class="note"><a href="./calib/">校正シートを開く（A4 原寸印刷）</a></p>
+        </details>
         <div>
           <label>分解能 GSD</label>
           <input type="text" id="gsd" readonly placeholder="—">

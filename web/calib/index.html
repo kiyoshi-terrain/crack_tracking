@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>レンズ校正シート — A4原寸印刷用</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #10131a; color: #e8ecf1;
+    font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 18px 60px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  h2 { font-size: 13px; letter-spacing: .06em; color: #a9b4c0; margin: 24px 0 8px; }
+  p, li { color: #a9b4c0; margin: 0 0 10px; }
+  b { color: #e8ecf1; }
+  ol { padding-left: 22px; }
+  .mono { font-family: SFMono-Regular, Menlo, monospace; }
+  button { -webkit-appearance: none; appearance: none; border: 0; border-radius: 10px;
+    background: #d99a2b; color: #111; font: inherit; font-weight: 700;
+    padding: 12px 18px; cursor: pointer; }
+  a { color: #d99a2b; }
+  .sheet { width: 210mm; height: 297mm; background: #fff; display: block;
+    margin: 20px auto; box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    transform-origin: top center; }
+  @media (max-width: 820px) { .sheet { transform: scale(0.42); margin-bottom: -160mm; } }
+  @media print {
+    @page { size: A4 portrait; margin: 0; }
+    body { background: #fff; }
+    .wrap { display: none; }
+    .sheet { transform: none; margin: 0; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>レンズ校正シート</h1>
+  <p>レンズの歪みを実測するための格子です。<b>7×5 の 35 点</b>。
+     A4 に原寸で印刷して使います。</p>
+
+  <h2>なぜ要るのか</h2>
+  <p>2時期を比べるとき、前回と立ち位置が違うと、レンズの歪みが偽の変位として残ります。
+     ホモグラフィは直線を直線に写すので、放射歪みを表現できないためです。
+     合成検証では、歪み 2% ＋ 姿勢差が中程度のとき <b>71 セル中 44 セルが偽陽性</b>になり、
+     校正を入れると <b>3 セル</b>（歪みが無い場合と同じ水準）まで戻りました。</p>
+  <p><b>同じ立ち位置に戻れているなら校正は要りません。</b>再訪ガイドどおりに戻れた場合は、
+     歪み 2% でも偽陽性は 0 でした。校正は「戻り切れなかったときの保険」です。</p>
+
+  <h2>手順</h2>
+  <ol>
+    <li>このページを <b>A4 原寸</b>で印刷する（拡大縮小なし）</li>
+    <li>反りのない板か壁に、たわまないよう平らに貼る</li>
+    <li>校正したいレンズ（0.5× / 1× / 5×）に切り替える</li>
+    <li><b>用紙が画面いっぱいに写る距離</b>から、正対・正立で撮る。
+        隅の点まで入れること（歪みは隅がいちばん大きい）</li>
+    <li>少し傾けた向きでも 2〜3 枚撮ると安定する</li>
+    <li>アプリのスケールシートから読み込む</li>
+  </ol>
+
+  <h2>気をつけること</h2>
+  <ul>
+    <li><b>用紙は平らに。</b>たわみは歪みと区別がつきません</li>
+    <li><b>正立で撮る。</b>90° 回すと格子の行を判別できず、アプリが読み込みを断ります</li>
+    <li>ピントを合わせる。ボケると重心がずれます</li>
+    <li>点は<b>暗い円</b>として検出します。強い反射や影が乗らない照明で</li>
+    <li>レンズごとに校正が要ります（超広角・広角・望遠は別のレンズです）</li>
+  </ul>
+
+  <p><button onclick="window.print()">印刷する</button></p>
+  <p><a href="../">σ実測ツールへ戻る</a>　<a href="../manual/">取扱説明書</a></p>
+</div>
+
+<svg class="sheet" xmlns="http://www.w3.org/2000/svg"
+     width="210mm" height="297mm" viewBox="0 0 210 297">
+  <rect width="210" height="297" fill="#fff"/>
+  <text x="105" y="16" font-family="sans-serif" font-size="6" font-weight="bold"
+        text-anchor="middle" fill="#000">レンズ校正シート</text>
+  <text x="105" y="24" font-family="sans-serif" font-size="3.4"
+        text-anchor="middle" fill="#444">7 × 5 = 35 点／A4 原寸印刷／正対・正立で、用紙が画面いっぱいに写る距離から</text>
+  <!-- 印刷倍率の確認 -->
+  <g stroke="#000" stroke-width="0.4">
+    <line x1="55" y1="32" x2="155" y2="32"/>
+    <line x1="55" y1="29.5" x2="55" y2="34.5"/>
+    <line x1="155" y1="29.5" x2="155" y2="34.5"/>
+    <line x1="80" y1="30.5" x2="80" y2="33.5"/>
+    <line x1="105" y1="30" x2="105" y2="34"/>
+    <line x1="130" y1="30.5" x2="130" y2="33.5"/>
+  </g>
+  <text x="105" y="38.5" font-family="sans-serif" font-size="3"
+        text-anchor="middle" fill="#000">この線が 100.0mm なら印刷倍率OK（25mm刻み）</text>
+  <g>
+        <circle cx="20.00" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="48.33" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="76.67" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="105.00" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="133.33" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="161.67" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="190.00" cy="45.00" r="4.5" fill="#000"/>
+        <circle cx="20.00" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="48.33" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="76.67" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="105.00" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="133.33" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="161.67" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="190.00" cy="101.75" r="4.5" fill="#000"/>
+        <circle cx="20.00" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="48.33" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="76.67" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="105.00" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="133.33" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="161.67" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="190.00" cy="158.50" r="4.5" fill="#000"/>
+        <circle cx="20.00" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="48.33" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="76.67" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="105.00" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="133.33" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="161.67" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="190.00" cy="215.25" r="4.5" fill="#000"/>
+        <circle cx="20.00" cy="272.00" r="4.5" fill="#000"/>
+        <circle cx="48.33" cy="272.00" r="4.5" fill="#000"/>
+        <circle cx="76.67" cy="272.00" r="4.5" fill="#000"/>
+        <circle cx="105.00" cy="272.00" r="4.5" fill="#000"/>
+        <circle cx="133.33" cy="272.00" r="4.5" fill="#000"/>
+        <circle cx="161.67" cy="272.00" r="4.5" fill="#000"/>
+        <circle cx="190.00" cy="272.00" r="4.5" fill="#000"/>
+  </g>
+  <text x="105" y="285" font-family="sans-serif" font-size="3"
+        text-anchor="middle" fill="#666">点が1つでも欠けたり、縁で切れたりしていると読み込めません</text>
+</svg>
+</body>
+</html>

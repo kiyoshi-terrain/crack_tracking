@@ -12,6 +12,7 @@ import { fitAffine, fitHomography, residuals } from './transform.js';
 import { summarize, detectionLimit, computeGSD, focalLengthPxFrom35mm } from './sigma.js';
 import { speckleQuality, focusScore } from './speckle.js';
 import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
+import { estimateDistortion, orderGrid, gridWorld, isIdentity } from './lenscal.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
 import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
@@ -716,8 +717,124 @@ initComparePanel({
   getFrames: () => state.files,
   getGsd: () => currentGSD(),
   getRoi: () => state.roi,
+  getLens: () => lensForCurrentPhotos(),
   onChange: updateSteps,
 });
+
+// ═══════════════════════════════════════════ レンズ校正
+//
+// 完全なカメラ校正はしない。焦点距離は仕様値で分かっており、主点は中心でよい。
+// ホモグラフィで吸えない放射歪みだけを、平面格子の1枚から実測する。
+const CALIB_KEY = 'lens-distortion';
+const CALIB_COLS = 7;
+const CALIB_ROWS = 5;
+
+function loadCalibrations() {
+  try { return JSON.parse(localStorage.getItem(CALIB_KEY)) || {}; } catch { return {}; }
+}
+function saveCalibrations(all) {
+  try { localStorage.setItem(CALIB_KEY, JSON.stringify(all)); } catch { /* 記憶できないだけ */ }
+}
+
+/**
+ * いま解析している写真に対応するレンズの校正を返す。
+ * 焦点距離がいちばん近いレンズのものを採る。判定できなければ補正しない
+ *（間違った補正は無補正より悪い。誤った係数を当てると偽陽性は減らない）。
+ */
+function lensForCurrentPhotos() {
+  const all = loadCalibrations();
+  if (!Object.keys(all).length) return null;
+  const focal = effectiveFocal35() ?? parseFloat($('focal35').value);
+  if (!(focal > 0)) return null;
+  let best = null;
+  for (const kind of ['ultra', 'wide', 'tele']) {
+    const f = focalOf(kind);
+    if (!(f > 0) || !all[kind]) continue;
+    const d = Math.abs(Math.log(focal / f));
+    if (!best || d < best.d) best = { d, kind, cal: all[kind] };
+  }
+  // 焦点距離が 15% 以上違うなら、そのレンズの校正ではない
+  if (!best || best.d > 0.14) return null;
+  return isIdentity(best.cal) ? null : best.cal;
+}
+
+function renderCalibStatus(message) {
+  const kind = $('calibLens').value;
+  const cal = loadCalibrations()[kind];
+  const names = { ultra: '超広角', wide: '広角', tele: '望遠' };
+  const stored = cal
+    ? `<div class="banner good"><div><b>${names[kind]}の校正あり</b><br>`
+      + `k1 <span class="mono">${cal.k1.toFixed(4)}</span>`
+      + ` / k2 <span class="mono">${cal.k2.toFixed(4)}</span>　`
+      + `残差 <span class="mono">${cal.rmsBeforePx.toFixed(2)} → ${cal.rmsPx.toFixed(3)} px</span>`
+      + `（${cal.points} 点・${cal.views} 枚）</div></div>`
+    : `<div class="banner"><div>${names[kind]}は未校正です。校正シートを撮って読み込んでください。</div></div>`;
+  $('calibStatus').innerHTML = (message ?? '') + stored;
+}
+
+$('calibLens').addEventListener('change', () => renderCalibStatus());
+$('calibLoad').addEventListener('click', () => $('calibInput').click());
+$('calibClear').addEventListener('click', () => {
+  const all = loadCalibrations();
+  delete all[$('calibLens').value];
+  saveCalibrations(all);
+  renderCalibStatus();
+  updateSteps();
+});
+
+$('calibInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const kind = $('calibLens').value;
+  renderCalibStatus('<p class="note">解析中…</p>');
+  await tick();
+
+  const views = [];
+  const problems = [];
+  let frame = null;
+  for (const [i, file] of files.entries()) {
+    try {
+      const image = await decodeFile(file);
+      // k1 は半対角で正規化しているので、縮小画像で測っても同じ値になる。
+      // 全解像度で探すと点が大きすぎて検出の想定半径から外れる
+      const factor = Math.max(1, Math.round(image.width / 1100));
+      const gray = downsample(toGray(image, null, 'luma', true), factor);
+      frame = { width: gray.width, height: gray.height };
+      const found = detectTargets(gray, {
+        minRadius: 6, maxRadius: 60, backgroundRadius: 70, darkTargets: true,
+      });
+      // 大きい順に並んでいる。用紙の文字より点のほうがずっと大きいので上位を採る
+      const ord = orderGrid(found.slice(0, CALIB_COLS * CALIB_ROWS), CALIB_COLS, CALIB_ROWS);
+      if (!ord.ok) { problems.push(`${file.name}: ${ord.reason}`); continue; }
+      views.push({ observed: ord.points, world: gridWorld(CALIB_COLS, CALIB_ROWS) });
+    } catch (err) {
+      problems.push(`${file.name}: ${err.message}`);
+    }
+    await tick();
+  }
+
+  if (!views.length) {
+    renderCalibStatus(`<div class="banner bad"><div><b>読み込めませんでした</b><br>`
+      + `${problems.map(escapeHtml).join('<br>')}</div></div>`);
+    return;
+  }
+  const est = estimateDistortion(views, frame);
+  if (!est) {
+    renderCalibStatus('<div class="banner bad"><div><b>推定できませんでした</b></div></div>');
+    return;
+  }
+  const all = loadCalibrations();
+  all[kind] = { ...est, views: views.length, at: new Date().toISOString() };
+  saveCalibrations(all);
+  renderCalibStatus(problems.length
+    ? `<div class="banner warn"><div>${problems.length} 枚は使えませんでした<br>`
+      + `${problems.map(escapeHtml).join('<br>')}</div></div>`
+    : '');
+  updateSteps();
+});
+
+renderCalibStatus();
 
 initCloudDiffPanel({
   onChange: updateSteps,

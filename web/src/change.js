@@ -20,6 +20,7 @@
 
 import { measureDisplacementField, estimateGlobalShift } from './dic.js';
 import { fitAffine, fitHomography, applyAffine, applyHomography, residuals } from './transform.js';
+import { undistortPoint, isIdentity } from './lenscal.js';
 
 function median(values) {
   if (!values.length) return 0;
@@ -235,6 +236,9 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     // 影の縁の判定。サブセット内で 2時期の明るさの比がこの割合を超えて
     // ばらついたら、そのセルの変位は信用しない
     illuminationTolerance = 0.13,
+    // レンズ歪み係数（lenscal.estimateDistortion の戻り値）。
+    // 与えると、当てはめの前に対応を理想（ピンホール）座標へ移す
+    lens = null,
     downsample = null,
     // 実機の画素数（4000px級）では広域探索が重すぎるので、段階1だけ
     // 縮小画像で回して変換を実寸へ引き上げる。座標の縮尺変換だけなので
@@ -334,15 +338,33 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     // モデルは段階1と同じにする。段階1がホモグラフィで反っていた場合、
     // アフィンの補正では角の反りを吸収できず、画面の角に系統残差が残る
     //（実際に角へ偽の有意セルが並んだ）
-    const stablePoints = stableRegion
-      ? fine.points.filter((p) => stableRegion(p.x, p.y))
+    // レンズ歪みの補正。ホモグラフィは放射歪みを表現できないので、姿勢差があると
+    // 取り切れない残りが偽の変位として出る（合成検証: 姿勢差が中程度で 71 セル中 44）。
+    // 対応を理想座標へ移してから当てれば、ホモグラフィで厳密に説明できる。
+    // 画像を作り直すより安い（画素ではなく点にだけ効かせる）
+    const undo = lens && !isIdentity(lens)
+      ? (x, y) => undistortPoint(x, y, lens, { width: referenceA.width, height: referenceA.height })
+      : null;
+    const fitPoints = undo
+      ? fine.points.map((p) => {
+        const [ax, ay] = undo(p.x, p.y);
+        // 対応先は「ワープ前の今回画像」での位置。そこで歪んでいる
+        const [rawX, rawY] = applyFull(p.x + p.u, p.y + p.v);
+        const [bx, by] = undo(rawX, rawY);
+        return { x: ax, y: ay, u: bx - ax, v: by - ay, zncc: p.zncc };
+      })
       : fine.points;
-    const refit = fitTransformRobust(stablePoints, useHomography);
+
+    const stableIdx = [];
+    for (let i = 0; i < fine.points.length; i += 1) {
+      if (!stableRegion || stableRegion(fine.points[i].x, fine.points[i].y)) stableIdx.push(i);
+    }
+    const refit = fitTransformRobust(stableIdx.map((i) => fitPoints[i]), useHomography);
     if (!refit.transform) {
       frameSummaries.push({ ok: false, matched: fine.points.length });
       continue;
     }
-    const res = residuals(refit.transform, fine.points);
+    const res = residuals(refit.transform, fitPoints);
 
 
     for (let i = 0; i < fine.points.length; i += 1) {

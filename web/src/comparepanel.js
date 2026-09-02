@@ -27,6 +27,7 @@ const MAX_FRAMES_B = 5;
 let getFrames = () => [];
 let getGsd = () => null;
 let getRoi = () => null;
+let getLens = () => null;
 let onChange = () => {};
 let baseFiles = [];
 let lastOutcome = null;   // 'changed' | 'surface' | 'quiet' | null
@@ -35,6 +36,7 @@ export function initComparePanel(options = {}) {
   getFrames = options.getFrames ?? (() => []);
   getGsd = options.getGsd ?? (() => null);
   getRoi = options.getRoi ?? (() => null);
+  getLens = options.getLens ?? (() => null);
   onChange = options.onChange ?? (() => {});
 
   $('compareLoad').addEventListener('click', () => $('compareInput').click());
@@ -197,6 +199,7 @@ async function run() {
       downsample,
       // 4000px 級では段階1を縮小画像で回す
       coarseScale: Math.max(1, Math.round(grayA.width / 1000)),
+      lens: getLens?.() ?? null,
       yieldBetweenFrames: tick,
       onFrame: (i, n) => status(`<p class="note">比較中… ${i + 1} / ${n} 枚</p>`),
     });
