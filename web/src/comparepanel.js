@@ -245,6 +245,20 @@ function render(result, grayA, context) {
       + `検出限界を超えて動いた場所も、表面が変質した場所もありません。</div></div>`;
   }
 
+  // 影の移動は本物と同じ大きさの偽の変位を作る（合成検証で σ の 400 倍・1.1px 級）。
+  // 落としたことを黙っていると、判定できていない場所が「変化なし」に化ける
+  const litCells = result.stats.illuminationChanged ?? 0;
+  if (litCells > 0) {
+    const ratio = litCells / Math.max(1, result.stats.evaluated);
+    verdict += `<div class="banner warn"><div><b>影が動いたと見られる領域は判定していません</b><br>`
+      + `${litCells} セル（評価対象の ${(ratio * 100).toFixed(0)}%）で、2時期の局所的な明るさの比が`
+      + `変わっています。図の斜線がその場所です。<b>ここは「変化なし」ではなく「判定できず」</b>です。`
+      + (ratio > 0.25
+        ? '広い範囲に及んでいます。前回と同じ時刻・同じ天候で撮り直すと精度が上がります。'
+        : '前回と同じ時刻に撮ると減らせます。')
+      + `</div></div>`;
+  }
+
   // ── 数値
   const cells = [
     ['時期またぎ σ', result.sigmaCrossPx != null ? toMM(result.sigmaCrossPx) : '—',
@@ -257,6 +271,7 @@ function render(result, grayA, context) {
     ['評価セル', String(result.stats.evaluated), `使用 ${context.usedFrames}/${context.totalFrames} 枚`],
     ['有意に動いた', String(result.stats.significant), 'セル'],
     ['表面の変質', String(result.stats.decorrelated), 'セル'],
+    ['影で判定できず', String(result.stats.illuminationChanged ?? 0), 'セル'],
   ];
   $('compareStats').innerHTML =
     `<div class="stats">${cells.map(([k, v, sub]) =>
@@ -321,10 +336,30 @@ function drawMap(result, grayA, groups) {
     return false;
   };
 
+  // 影が動いたセルは「変化なし」ではなく「判定できず」。斜線で塗り分ける。
+  // 未評価と良好を同じ見た目にすると、測れていない場所が問題なしに化ける
+  const hatch = (x, y) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - cell / 2, y - cell / 2, cell, cell);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(160,160,160,0.5)';
+    ctx.lineWidth = 1;
+    for (let d = -cell; d < cell * 2; d += 5) {
+      ctx.beginPath();
+      ctx.moveTo(x - cell / 2 + d, y - cell / 2);
+      ctx.lineTo(x - cell / 2 + d - cell, y + cell / 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
   for (const c of result.cells) {
     const x = c.x * scale;
     const y = c.y * scale;
-    if (c.decorrelated) {
+    if (c.illuminationChanged) {
+      hatch(x, y);
+    } else if (c.decorrelated) {
       ctx.fillStyle = 'rgba(74,125,157,0.55)';
       ctx.fillRect(x - cell / 2, y - cell / 2, cell, cell);
     } else if (c.significant) {

@@ -156,6 +156,71 @@ function intersectRegion(a, b) {
  *              ここで足してやらないと限界を過小評価する
  *   k — 何σで有意とするか（既定 3）
  */
+/**
+ * 2時期の局所的な明るさの比が、サブセット内でどれだけ不均一かを返す。
+ *
+ * ZNSSD はサブセット内の明るさが**一様に**変わるぶんには影響されない。
+ * だが影の縁のように**場所によって違う**変わり方には効かない。縁をまたぐ
+ * サブセットは時期間で明暗の配り方が変わり、偽の変位として出る
+ *（合成検証で σ の 400 倍・1.1px 級が出た）。
+ *
+ * 3x3 の小ブロックごとに比 B/A を取り、（最大 − 最小）/ 中央値 を返す。
+ * 一様な変化なら 0 に近く、縁をまたぐと大きくなる。幾何ではなく局所量なので、
+ * 縁が画面外へ抜けたあとの取り残しも拾える。
+ *
+ * **測った変位ぶんずらした位置で比べること。** 同じ座標で比べると、模様が
+ * 1px 動いただけで小ブロックの平均が変わり、本物の変位を影と誤認する
+ *（実際に誤認し、仕込んだ 1.08px のブロックが丸ごと消えた）。
+ * ずらして比べれば、剛体変位では明るさが一致し、照明の変化だけが残る。
+ *
+ * @param {Gray} a 基準（幾何を揃えたもの）
+ * @param {Gray} b 今回（同上）
+ * @param {number} du b 側を読む位置のずれ（測った変位）
+ */
+function illuminationSpread(a, b, cx, cy, half, du = 0, dv = 0) {
+  const FLOOR = 0.02;          // 暗部で比が暴れるのを防ぐ
+  const s = Math.max(2, Math.floor((2 * half + 1) / 3));
+  const ratios = [];
+  for (let by = -1; by <= 1; by += 1) {
+    for (let bx = -1; bx <= 1; bx += 1) {
+      const x0 = Math.round(cx + bx * s - s / 2);
+      const y0 = Math.round(cy + by * s - s / 2);
+      let sa = 0, sb = 0, n = 0;
+      for (let y = y0; y < y0 + s; y += 1) {
+        if (y < 0 || y >= a.height) continue;
+        for (let x = x0; x < x0 + s; x += 1) {
+          if (x < 0 || x >= a.width) continue;
+          const bx2 = x + du;
+          const by2 = y + dv;
+          if (bx2 < 0 || by2 < 0 || bx2 >= b.width - 1 || by2 >= b.height - 1) continue;
+          sa += a.data[y * a.width + x];
+          sb += bilinear(b, bx2, by2);
+          n += 1;
+        }
+      }
+      if (n < 4) continue;
+      const ma = sa / n;
+      const mb = sb / n;
+      if (ma < FLOOR || mb < FLOOR) continue;
+      ratios.push(mb / ma);
+    }
+  }
+  if (ratios.length < 5) return 0;
+  ratios.sort((x, y) => x - y);
+  const med = ratios[ratios.length >> 1];
+  return med > 0 ? (ratios[ratios.length - 1] - ratios[0]) / med : 0;
+}
+
+function bilinear(img, x, y) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = x - x0;
+  const ty = y - y0;
+  const i = y0 * img.width + x0;
+  return (img.data[i] * (1 - tx) + img.data[i + 1] * tx) * (1 - ty)
+    + (img.data[i + img.width] * (1 - tx) + img.data[i + img.width + 1] * tx) * ty;
+}
+
 export async function measureEpochChange(referenceA, framesB, options = {}) {
   const {
     subsetHalf = 15,
@@ -167,6 +232,9 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     sigmaAPx = null,
     k = 3,
     coarseSearch = 40,
+    // 影の縁の判定。サブセット内で 2時期の明るさの比がこの割合を超えて
+    // ばらついたら、そのセルの変位は信用しない
+    illuminationTolerance = 0.13,
     downsample = null,
     // 実機の画素数（4000px級）では広域探索が重すぎるので、段階1だけ
     // 縮小画像で回して変換を実寸へ引き上げる。座標の縮尺変換だけなので
@@ -280,7 +348,7 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     for (let i = 0; i < fine.points.length; i += 1) {
       const p = fine.points[i];
       const b = bins.get(key(p.x, p.y)) ?? {
-        x: p.x, y: p.y, n: 0, su: 0, sv: 0, suu: 0, svv: 0, zncc: [], failed: 0,
+        x: p.x, y: p.y, n: 0, su: 0, sv: 0, suu: 0, svv: 0, zncc: [], illum: [], failed: 0,
       };
       b.n += 1;
       b.su += res[i].du;
@@ -288,12 +356,16 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       b.suu += res[i].du * res[i].du;
       b.svv += res[i].dv * res[i].dv;
       b.zncc.push(p.zncc);
+      // 変位ぶんずらして読む。p.u/p.v は基準→ワープ後の実測変位
+      b.illum.push(illuminationSpread(
+        referenceA, warped.image, p.x, p.y, subsetHalf, p.u ?? 0, p.v ?? 0
+      ));
       bins.set(key(p.x, p.y), b);
     }
     for (const c of fine.cells) {
       if (c.ok) continue;
       const b = bins.get(key(c.x, c.y)) ?? {
-        x: c.x, y: c.y, n: 0, su: 0, sv: 0, suu: 0, svv: 0, zncc: [], failed: 0,
+        x: c.x, y: c.y, n: 0, su: 0, sv: 0, suu: 0, svv: 0, zncc: [], illum: [], failed: 0,
       };
       b.failed += 1;
       if (c.zncc != null) b.zncc.push(c.zncc);
@@ -326,10 +398,17 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       b.failed / evaluated >= 0.5 || (znccMedian != null && znccMedian < minZNCC)
     );
 
+    // 影の縁は時期ごとに位置が違うので、フレーム間で最悪値ではなく中央値を採る
+    const iSorted = [...b.illum].sort((a2, c2) => a2 - c2);
+    const illum = iSorted.length ? iSorted[iSorted.length >> 1] : 0;
+    const illuminationChanged = illum > illuminationTolerance;
+
     let cell = {
       x: b.x, y: b.y, n: b.n, failed: b.failed,
       zncc: znccMedian,
       decorrelated,
+      illum,
+      illuminationChanged,
       du: null, dv: null, magnitudePx: null, sePx: null, significant: false,
     };
 
@@ -356,8 +435,9 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
         du, dv,
         magnitudePx: magnitude,
         sePx: se,
-        // 相関が切れかけのセルの変位は信用しない（半端に掴んだ値が跳ねる）
-        significant: !decorrelated && se > 0 && magnitude > k * se,
+        // 相関が切れかけのセル、影の縁をまたいだセルの変位は信用しない
+        //（半端に掴んだ値が跳ねる）
+        significant: !decorrelated && !illuminationChanged && se > 0 && magnitude > k * se,
       };
     }
 
@@ -367,7 +447,7 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
   // 変質セルに隣接するセルの「変位」は信用しない。サブセット半径は測点間隔と
   // 同程度なので、隣のセルの窓は変質域に食い込んでおり、半端な値を掴んでいる
   const decorrelatedSet = new Set(
-    cells.filter((c) => c.decorrelated).map((c) => `${c.x},${c.y}`)
+    cells.filter((c) => c.decorrelated || c.illuminationChanged).map((c) => `${c.x},${c.y}`)
   );
   for (const c of cells) {
     if (!c.significant) continue;
@@ -401,6 +481,7 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       evaluated: cells.length,
       significant: significantCells.length,
       decorrelated: decorrelatedCells.length,
+      illuminationChanged: cells.filter((c) => c.illuminationChanged).length,
       maxMagnitudePx: significantCells.length
         ? Math.max(...significantCells.map((c) => c.magnitudePx))
         : 0,
