@@ -633,6 +633,17 @@ updateSteps();
 
 // ── 版とエラーを画面に出す。iPhone には開発者ツールが無いので、黙って死ぬのが最悪
 $('appVersion').textContent = APP_VERSION;
+$('hudVersion').textContent = APP_VERSION;
+$('diagVersion').textContent = `版 ${APP_VERSION}`;
+// HUD の版を押すと診断情報を開いた状態で写真シートへ
+$('hudVersion').closest('button').addEventListener('click', () => { $('diagBody').closest('details').open = true; });
+// 更新の再読み込み直後なら、何が起きたかを一言出す（黙って画面が変わるのは不親切）
+try {
+  if (sessionStorage.getItem('sw-updated') === '1') {
+    sessionStorage.removeItem('sw-updated');
+    setTimeout(() => setViewfinderHint(`${APP_VERSION} に更新しました`, 'info'), 1200);
+  }
+} catch { /* 記憶なし */ }
 const diagLog = [];
 function noteError(kind, message) {
   const line = `${new Date().toISOString().slice(11, 19)} ${kind}: ${message}`;
@@ -823,7 +834,10 @@ async function runMeasurement() {
   setProgress(0);
   $('run').disabled = false;
   // 解析中に新しい版が入っていたら、終わってから切り替える
-  if (state.reloadPending) location.reload();
+  if (state.reloadPending) {
+    try { sessionStorage.setItem('sw-updated', '1'); } catch { /* 記憶できないだけ */ }
+    location.reload();
+  }
 }
 
 /**
@@ -1235,7 +1249,10 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
         // 計測中・解析中に再読み込みすると撮った枚を捨てることになる。終わってから
         if (sessionActive() || $('run').disabled) { state.reloadPending = true; return; }
         refreshing = true;
-        try { sessionStorage.setItem('sw-reloaded-at', String(Date.now())); } catch { /* 記憶できないだけ */ }
+        try {
+          sessionStorage.setItem('sw-reloaded-at', String(Date.now()));
+          sessionStorage.setItem('sw-updated', '1');
+        } catch { /* 記憶できないだけ */ }
         location.reload();
       });
       const reg = await navigator.serviceWorker.register('./sw.js');

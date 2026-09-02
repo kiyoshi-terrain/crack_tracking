@@ -96,6 +96,8 @@
   .hud-k { font-size: 9px; letter-spacing: .1em; color: var(--ink-dim); }
   .hud-v { font-size: 19px; font-weight: 500; line-height: 1.1; letter-spacing: -.01em; }
   .hud-u { font-size: 10px; color: var(--ink-dim); margin-left: 2px; font-weight: 400; }
+  .hud-ver { margin-left: auto; min-width: 0; border-right: 0; border-left: 1px solid var(--line); align-items: flex-end; text-align: right; }
+  .hud-ver .hud-v { font-size: 13px; color: var(--ink-soft); font-family: SFMono-Regular, Menlo, monospace; }
   .hud-item[data-state="idle"] .hud-v { color: var(--ink-dim); }
   .hud-item[data-state="ok"]   .hud-v { color: var(--ink); }
   .hud-item[data-state="warn"] .hud-v { color: var(--amber); }
@@ -507,6 +509,8 @@
     <button class="hud-item" data-sheet="cloud" data-state="idle"><span class="hud-k">距離</span><span><span class="hud-v" id="hudDistance">—</span><span class="hud-u">m</span></span></button>
     <button class="hud-item" data-sheet="cloud" data-state="idle"><span class="hud-k">斜角</span><span><span class="hud-v" id="hudOblique">—</span><span class="hud-u">°</span></span></button>
     <button class="hud-item" data-sheet="result" data-state="idle"><span class="hud-k">検出限界</span><span><span class="hud-v" id="hudLimit">—</span><span class="hud-u" id="hudLimitUnit"></span></span></button>
+    <!-- 版は常時見える場所に。空画面にしか無いと、起動＝カメラの今の作りでは目に入らない -->
+    <button class="hud-item hud-ver" data-sheet="photo" data-state="ok" title="版と診断情報"><span class="hud-k">版</span><span><span class="hud-v" id="hudVersion">—</span></span></button>
   </div>
 
   <!-- ビューファインダー ───────────────────── -->
@@ -595,7 +599,7 @@
       <div id="quickCheck"></div>
 
       <details class="advanced" style="margin-top:14px">
-        <summary>診断情報（うまく動かないとき）</summary>
+        <summary>診断情報 <span class="mono" id="diagVersion"></span>（うまく動かないとき）</summary>
         <pre id="diagBody" class="mono" style="white-space:pre-wrap;font-size:11px;line-height:1.5;user-select:text;-webkit-user-select:text;background:rgba(0,0,0,.4);padding:10px;border-radius:8px"></pre>
         <div class="btn-row">
           <button id="diagRefresh">更新</button>
