@@ -250,6 +250,14 @@ console.log('\n== サービスワーカー ==');
   const ver = readFileSync(new URL('../src/version.js', import.meta.url), 'utf8').match(/'v(\d+)'/)?.[1];
   const cacheVer = sw.match(/sigma-tool-v(\d+)/)?.[1];
   check('版番号が sw.js と version.js で一致', ver && ver === cacheVer, `version.js v${ver} / sw.js v${cacheVer}`);
+  // index.html の data-version は「HTML とモジュールの食い違い」検知の基準。
+  // ずれたまま配ると、正しい版なのに毎回取り直しに入る
+  const htmlVer = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<html[^>]*data-version="v(\d+)"/)?.[1];
+  check('版番号が index.html とも一致', htmlVer && htmlVer === ver,
+    `index.html v${htmlVer} / version.js v${ver}`);
+  // 復旧ページはキャッシュ一覧に入れてはいけない（古い SW に捕まって出口にならない）
+  check('reset.html はキャッシュ一覧に入れない', !sw.includes("'./reset.html'"));
 }
 
 console.log(`\n${passed} 件成功 / ${failed} 件失敗`);

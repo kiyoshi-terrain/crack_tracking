@@ -16,7 +16,7 @@
 import { toGray, downsample } from './image.js';
 import { speckleQuality, focusScore } from './speckle.js';
 import { estimateGlobalShift } from './dic.js';
-import { shouldStop, frameGate, quickSigma, limitEstimate, estimateLensRatioAsync, resample } from './capture.js';
+import { shouldStop, frameGate, quickSigma, limitEstimate, resample } from './capture.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -35,10 +35,6 @@ let lenses = [];          // [{deviceId, label, kind: 'ultra'|'wide'|'tele'}]
 let activeDeviceId = null;
 let currentZoom = 1;
 const LENS_KEY = 'live-lens';
-const FACTORS_KEY = 'lens-factors';   // deviceId → 広角比の倍率（実測値）
-let lensFactors = {};
-try { lensFactors = JSON.parse(localStorage.getItem(FACTORS_KEY)) || {}; } catch { /* 記憶なし */ }
-let calibrating = null;   // 倍率を実測中のレンズの deviceId（UI が「実測中」と出すため）
 let session = null;    // { frames: [{imageData, small, focus}], sigmas, limits, rejects, timer }
 let finishing = false; // セッション終了後、本解析へ渡し終わるまで true（二重起動を防ぐ）
 let starting = null;   // startLive の進行中 Promise（二重起動でストリームが漏れないように）
@@ -141,23 +137,14 @@ export function lensState() {
   }
   const active = lenses.find((l) => l.deviceId === activeDeviceId) ?? null;
   const kind = active?.kind ?? 'wide';
-  // 倍率: 広角は 1。それ以外は実測値があればそれ（無ければ null → UI が入力を促す）
-  const factor = kind === 'wide' ? 1 : (lensFactors[activeDeviceId] ?? null);
-  return { lenses, activeDeviceId, activeKind: kind, zoom, factor, calibrating: calibrating === activeDeviceId };
+  // 倍率: 広角は 1。それ以外はここでは決めない（スケールシートの手入力に任せる）
+  const factor = kind === 'wide' ? 1 : null;
+  return { lenses, activeDeviceId, activeKind: kind, zoom, factor };
 }
 
 /** レンズを切り替える（計測中は不可）。 */
 export async function switchLens(deviceId) {
   if (!stream || session || deviceId === activeDeviceId) return false;
-  const fromKind = lensState().activeKind;
-  const toKind = lenses.find((l) => l.deviceId === deviceId)?.kind ?? 'wide';
-  // 広角から別レンズへ移るとき、倍率が未実測なら切替前の画を取っておいて測る。
-  // 広角側がデジタルズーム中なら、その分は倍率に戻して記録する（ズーム 2× の
-  // 画と比べて測った比は「広角 2× 比」なので、そのまま保存すると GSD が半分になる）
-  const wideZoom = currentZoom || 1;
-  const wideFrame = fromKind === 'wide' && toKind !== 'wide' && lensFactors[deviceId] == null
-    ? grabSmall(SMALL_WIDTH)?.gray : null;
-
   const next = await openStream(deviceId);
   stream.getTracks().forEach((t) => t.stop());
   stream = next;
@@ -167,78 +154,7 @@ export async function switchLens(deviceId) {
   currentZoom = stream.getVideoTracks()[0]?.getSettings?.().zoom ?? 1;
   try { localStorage.setItem(LENS_KEY, deviceId); } catch { /* 記憶できないだけ */ }
   deps.onStateChange?.();
-
-  if (wideFrame) calibrateLensFactor(deviceId, wideFrame, wideZoom);
   return true;
-}
-
-/**
- * レンズ倍率の実測。切替直後の露出が落ち着くのを待ってから、
- * 広角の画と新レンズの画を比べる。機種名は Web から読めないので、測る。
- */
-async function calibrateLensFactor(deviceId, wideFrame, wideZoom = 1) {
-  calibrating = deviceId;
-  deps.onStateChange?.();
-  try {
-    await measureLensFactor(deviceId, wideFrame, wideZoom);
-  } finally {
-    calibrating = null;
-    deps.onStateChange?.();
-  }
-}
-
-async function measureLensFactor(deviceId, wideFrame, wideZoom) {
-  setLiveStatus('レンズの倍率を実測中… そのまま向けていてください', 'info');
-  // 新しいストリームの最初のフレームが来るまで待つ（iOS は 1 秒以上かかることがある）。
-  // 待たずに掴むと空フレームで黙って諦め、倍率が永遠に付かない
-  const deadline = Date.now() + 5000;
-  while ((!video || video.videoWidth === 0 || video.readyState < 2) && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  await new Promise((r) => setTimeout(r, 700));   // 露出・フォーカスが落ち着くぶん
-  if (activeDeviceId !== deviceId || !video) return;
-  let now = null;
-  for (let i = 0; i < 3 && !now; i += 1) {
-    now = grabSmall(SMALL_WIDTH)?.gray ?? null;
-    if (!now) await new Promise((r) => setTimeout(r, 300));
-  }
-  if (!now) {
-    setLiveStatus('映像が来ないため倍率を測れませんでした。広角に戻してもう一度切り替えてください', 'warn');
-    return;
-  }
-  // 望遠なら 1× 以上、超広角なら 1× 以下しかありえない。範囲を絞れば同じ密度で半分の時間
-  const kind = lenses.find((l) => l.deviceId === deviceId)?.kind;
-  const range = kind === 'tele' ? { minRatio: 1, maxRatio: 8, steps: 60 }
-    : kind === 'ultra' ? { minRatio: 0.3, maxRatio: 1, steps: 35 } : {};
-  const est = await estimateLensRatioAsync(wideFrame, now, range, (done, total) => {
-    setLiveStatus(`レンズの倍率を実測中… ${Math.round(100 * done / total)}%　そのまま向けていてください`, 'info');
-  });
-  if (activeDeviceId !== deviceId || !stream) return;   // 測っている間に切り替えられた
-  if (!est) {
-    setLiveStatus('倍率を実測できませんでした（模様が足りないか、壁がずれました）。広角に戻してもう一度切り替えてください', 'warn');
-    return;
-  }
-  // 比は縮小画どうしで測っている。レンズごとに映像の解像度が違うと縮小率も違うので、
-  // 縮小前の幅の比で戻す。広角側のデジタルズーム分も戻す
-  const ratio = est.ratio * (wideFrame.width / now.width) * wideZoom;
-  lensFactors[deviceId] = Math.round(ratio * 100) / 100;
-  try { localStorage.setItem(FACTORS_KEY, JSON.stringify(lensFactors)); } catch { /* 記憶できないだけ */ }
-  const name = lenses.find((l) => l.deviceId === deviceId)?.kind === 'tele' ? '望遠' : '超広角';
-  setLiveStatus(`${name}の倍率を実測: ${lensFactors[deviceId].toFixed(2)}×（広角比・相関 ${est.zncc.toFixed(2)}）`, 'good');
-  deps.onStateChange?.();
-}
-
-/** 指定レンズの実測倍率（広角比）。未実測なら null。 */
-export function lensFactorOf(deviceId) {
-  const kind = lenses.find((l) => l.deviceId === deviceId)?.kind;
-  if (kind === 'wide') return 1;
-  return lensFactors[deviceId] ?? null;
-}
-
-/** 実測した倍率を捨てて測り直す（レンズを付け替えた・別端末で復元したとき）。 */
-export function forgetLensFactors() {
-  lensFactors = {};
-  try { localStorage.removeItem(FACTORS_KEY); } catch { /* なし */ }
 }
 
 /**

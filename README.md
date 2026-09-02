@@ -29,7 +29,7 @@
 
 ```bash
 cd web && python3 -m http.server 8080   # → http://localhost:8080
-node test/run.mjs                        # アルゴリズムの検証（231件）
+node test/run.mjs                        # アルゴリズムの検証（230件）
 ```
 
 ---
@@ -159,7 +159,7 @@ web/                   σ実測ツール（ブラウザ完結・端末非依存�
   src/history.js       測点・2時期比較・傾き・温度分離
   src/shell.js         カメラ風シェル（HUD・レール・シート）
   src/exif.js          焦点距離の抽出と複数枚の整合性検証
-  test/run.mjs         合成データによる検証（231件）
+  test/run.mjs         合成データによる検証（230件）
 
 Sources/CrackCore/     計測アルゴリズム（ARKit 非依存・テスト可能）
   Geometry/            カメラ幾何・平面フィット・px→mm 換算

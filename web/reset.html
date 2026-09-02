@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>σ実測ツール — 更新して直す</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 28px 22px;
+    background: #10131a; color: #e8ecf1;
+    font: 15px/1.7 -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 19px; margin: 0 0 6px; }
+  p { margin: 0 0 14px; color: #a9b4c0; }
+  .mono { font-family: SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  #log {
+    margin: 18px 0; padding: 14px; border-radius: 10px;
+    background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.09);
+    font-family: SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.8;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .ok { color: #5ec48a; }
+  .bad { color: #c9564e; }
+  a.btn, button {
+    -webkit-appearance: none; appearance: none; display: block; width: 100%;
+    box-sizing: border-box; margin-top: 12px; padding: 14px;
+    border: 0; border-radius: 12px; background: #d99a2b; color: #111;
+    font: inherit; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer;
+  }
+  a.sub { display: block; margin-top: 14px; color: #a9b4c0; font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>更新して直す</h1>
+  <p>古い版が端末に残って新しい版に入れ替わらないときに使います。
+     保存した基準セットと測点の記録は消えません。</p>
+  <div id="log">開始しています…</div>
+  <a class="btn" id="go" href="./">アプリを開く</a>
+  <a class="sub" href="./manual/">取扱説明書</a>
+
+<script>
+// このページは**わざとサービスワーカーのキャッシュ一覧に載せていない**。
+// 古い版（v15）の SW は「キャッシュにあれば永久にそれを返す」作りなので、
+// キャッシュに無い URL でないとネットワークまで届かない。ここが唯一の出口になる。
+//
+// やること: SW の登録を全部外す → キャッシュを全部消す → 版を確かめる。
+// IndexedDB（基準セット）と localStorage（測点・スケール入力）は触らない。
+var log = document.getElementById('log');
+var lines = [];
+function say(text, cls) {
+  lines.push(cls ? '<span class="' + cls + '">' + text + '</span>' : text);
+  log.innerHTML = lines.join('\n');
+}
+
+(async function () {
+  try {
+    var regs = [];
+    if ('serviceWorker' in navigator) {
+      regs = await navigator.serviceWorker.getRegistrations();
+      for (var i = 0; i < regs.length; i += 1) await regs[i].unregister();
+    }
+    say('サービスワーカーを解除: ' + regs.length + ' 件', 'ok');
+
+    var keys = [];
+    if (window.caches) {
+      keys = await caches.keys();
+      for (var j = 0; j < keys.length; j += 1) await caches.delete(keys[j]);
+    }
+    say('キャッシュを削除: ' + (keys.length ? keys.join(', ') : 'なし'), 'ok');
+    say('ファイルを取り直し: …');
+
+    // ここが肝心。SW のキャッシュを消しても、**ブラウザの HTTP キャッシュ**には
+    // 古いモジュールが max-age のあいだ残る。そのまま開くと
+    // 「新しい index.html ＋ 古い app.js」の混在になり、起動時に即死する
+    // （実際にこの経路を再現して捕まえた）。だから先に全部取り直す。
+    var swText = await (await fetch('./sw.js', { cache: 'reload' })).text();
+    var urls = [];
+    var re = /'(\.\/[^']*)'/g, hit;
+    while ((hit = re.exec(swText))) if (urls.indexOf(hit[1]) < 0) urls.push(hit[1]);
+    if (urls.indexOf('./') < 0) urls.push('./');
+    var failed = 0;
+    for (var k = 0; k < urls.length; k += 1) {
+      try { await fetch(urls[k], { cache: 'reload' }); } catch (err) { failed += 1; }
+      lines[lines.length - 1] = 'ファイルを取り直し: ' + (k + 1) + ' / ' + urls.length;
+      log.innerHTML = lines.join('\n');
+    }
+    lines.pop();
+    say('ファイルを取り直し: ' + urls.length + ' 件' + (failed ? '（失敗 ' + failed + '）' : ''),
+      failed ? 'bad' : 'ok');
+
+    // サーバーにある本当の版を、キャッシュを通さずに読む
+    var res = await fetch('./src/version.js', { cache: 'reload' });
+    var text = await res.text();
+    var m = text.match(/'(v\d+)'/);
+    say('サーバーの版: ' + (m ? m[1] : '読めませんでした'), m ? 'ok' : 'bad');
+    say('');
+    say('「アプリを開く」を押すと、この版で開きます。');
+  } catch (e) {
+    say('失敗: ' + (e && e.message ? e.message : e), 'bad');
+    say('Safari の 設定 → Safari → 履歴とWebサイトデータを消去 でも直ります。');
+  }
+})();
+
+// キャッシュを消した直後に開く。念のためキャッシュを通さない指定を付ける
+document.getElementById('go').addEventListener('click', function (e) {
+  e.preventDefault();
+  location.replace('./');
+});
+</script>
+</body>
+</html>

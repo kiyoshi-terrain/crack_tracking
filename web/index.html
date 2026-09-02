@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-version="v20">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -605,6 +605,8 @@
           <button id="diagRefresh">更新</button>
           <button id="diagCopy">コピー</button>
         </div>
+        <p class="note">版が上がらない・動きがおかしいときは
+          <a href="./reset.html">更新して直す</a>（記録は消えません）。</p>
         <p class="note">貼り付けて送ってもらえれば、その内容から原因を特定します。</p>
       </details>
     </div>
@@ -618,13 +620,23 @@
           <input type="number" id="distance" step="0.01" min="0.05" inputmode="decimal" placeholder="レーザー距離計の実測値">
         </div>
         <div>
-          <label>35mm換算焦点距離（mm）— 広角 1× の値</label>
-          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="EXIF から自動（iPhone 主カメラ 24〜26）">
+          <label>35mm換算焦点距離（mm）— 広角</label>
+          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="写真は EXIF から自動（iPhone 主カメラ 24）">
         </div>
         <div>
-          <label>望遠レンズの倍率（自動実測できなかったときの保険）</label>
-          <input type="number" id="teleFactor" step="0.1" inputmode="decimal" placeholder="通常は不要。広角→望遠に切り替えると自動で測ります">
+          <label>35mm換算焦点距離（mm）— 望遠</label>
+          <input type="number" id="focalTele" step="0.1" inputmode="decimal" placeholder="iPhone 16 Pro の 5× なら 120">
         </div>
+        <div>
+          <label>35mm換算焦点距離（mm）— 超広角</label>
+          <input type="number" id="focalUltra" step="0.1" inputmode="decimal" placeholder="iPhone 16 Pro なら 13">
+        </div>
+        <div class="banner"><div>
+          <b>数字はメーカーの仕様から取ってください。</b>推測も実測もしません。
+          Apple は 35mm 換算で公表しています（16 Pro: 超広角 13 / 広角 24 / 望遠 120mm）。
+          「2×」は広角センサーの切り出しなので、広角の値の 2 倍（48mm）として扱います。
+          <button id="presetIphone16Pro" style="margin-top:8px">iPhone 16 Pro の値を入れる</button>
+        </div></div>
         <div>
           <label>分解能 GSD</label>
           <input type="text" id="gsd" readonly placeholder="—">
@@ -978,5 +990,58 @@
   </section>
 
 <script type="module" src="./src/app.js"></script>
+<script>
+// ── 版の食い違いを自分で直す（この <script> は普通のスクリプトなので必ず走る）
+//
+// サービスワーカーのキャッシュとブラウザの HTTP キャッシュは別物なので、
+// 「新しい index.html ＋ 古い app.js」という混在が起きうる。新しい import が
+// 古いモジュールに無いと、起動時に何も言わず死ぬ（実機で実際に起きた）。
+// ここで HTML の版とモジュールの版を突き合わせ、食い違っていたら
+// シェル一式を取り直してから一度だけ読み直す。
+// モジュールが例外で落ちた場合も __JS_VERSION が付かないので同じ経路で拾える。
+(function () {
+  var HTML_VERSION = document.documentElement.dataset.version;
+  var KEY = 'ver-heal-at';
+
+  function healed(reason) {
+    var last = 0;
+    try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch (e) { /* 記憶なし */ }
+    // 30秒以内に直したばかりなら、繰り返さずに理由を出す（無限ループを作らない）
+    if (Date.now() - last < 30000) {
+      var el = document.getElementById('vfHint');
+      if (el) {
+        el.textContent = '更新が途中で止まっています。写真シートの「更新して直す」を開いてください。';
+        el.dataset.kind = 'bad';
+      }
+      return;
+    }
+    try { sessionStorage.setItem(KEY, String(Date.now())); } catch (e) { /* 同上 */ }
+    console.warn('版の食い違いを検知したので取り直します:', reason);
+    // シェル一式を HTTP キャッシュを通さずに取り直してから読み直す。
+    // 取り直さずに reload すると、また同じ古いモジュールが返ってくる
+    fetch('./sw.js', { cache: 'reload' })
+      .then(function (r) { return r.text(); })
+      .then(function (text) {
+        var urls = [];
+        var re = /'(\.\/[^']*)'/g, hit;
+        while ((hit = re.exec(text))) if (urls.indexOf(hit[1]) < 0) urls.push(hit[1]);
+        if (urls.indexOf('./') < 0) urls.push('./');
+        return Promise.all(urls.map(function (u) {
+          return fetch(u, { cache: 'reload' }).catch(function () { /* 1本くらいは諦める */ });
+        }));
+      })
+      .catch(function () { /* 圏外なら取り直せない。それでも読み直しは試す */ })
+      .then(function () { location.reload(); });
+  }
+
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      var js = window.__JS_VERSION;
+      if (js === HTML_VERSION) return;
+      healed(js ? ('HTML ' + HTML_VERSION + ' / JS ' + js) : 'モジュールが起動しなかった');
+    }, 1200);
+  });
+})();
+</script>
 </body>
 </html>

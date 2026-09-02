@@ -117,9 +117,12 @@ export function limitEstimate(sigmas, gsd) {
   return { px, mm: gsd ? px * gsd : null, frames, sigmaPx: median };
 }
 
-// ---------------------------------------------------------------- レンズ倍率の実測
+// ---------------------------------------------------------------- 補助
 
-/** バイリニアで任意倍率に再標本化する（scale<1 で縮小）。 */
+/**
+ * バイリニアで任意倍率に再標本化する（scale<1 で縮小）。
+ * 基準画像とライブ映像で縮小後の寸法が違うとき、幅を揃えるのに使う。
+ */
 export function resample(image, scale) {
   const w = Math.max(2, Math.round(image.width * scale));
   const h = Math.max(2, Math.round(image.height * scale));
@@ -141,99 +144,4 @@ export function resample(image, scale) {
     }
   }
   return { width: w, height: h, data: out };
-}
-
-function centerCrop(image, w, h) {
-  const x0 = Math.max(0, Math.floor((image.width - w) / 2));
-  const y0 = Math.max(0, Math.floor((image.height - h) / 2));
-  const cw = Math.min(w, image.width - x0);
-  const ch = Math.min(h, image.height - y0);
-  const out = new Float32Array(cw * ch);
-  for (let y = 0; y < ch; y += 1) {
-    out.set(image.data.subarray((y0 + y) * image.width + x0, (y0 + y) * image.width + x0 + cw), y * cw);
-  }
-  return { width: cw, height: ch, data: out };
-}
-
-/**
- * 2つのレンズで同じ壁を撮った画から、焦点距離の比（other / wide）を実測する。
- *
- * 望遠の倍率は API から取れず、機種名も Web からは読めない。だが同じ壁を
- * 広角と望遠で撮れば、倍率は「どれだけ縮めると重なるか」として測れる。
- * 対数格子で比を振り、共通スケールに揃えた2枚の相関が最大になる比を採る。
- * 光軸のずれ（レンズ間の物理距離）は並進探索で吸収する。
- *
- * @returns {{ratio: number, zncc: number}|null}
- */
-export function estimateLensRatio(wide, other, options = {}) {
-  const it = lensRatioSearch(wide, other, options);
-  for (;;) {
-    const { done, value } = it.next();
-    if (done) return value;
-  }
-}
-
-/**
- * estimateLensRatio の非同期版。格子の1点ごとにイベントループへ戻すので、
- * ライブ映像や操作を止めずに測れる（同期版は数秒〜数十秒メインスレッドを塞ぐ）。
- * @param {(done:number, total:number)=>void} [onProgress]
- */
-export async function estimateLensRatioAsync(wide, other, options = {}, onProgress = null) {
-  const it = lensRatioSearch(wide, other, options);
-  for (;;) {
-    const { done, value } = it.next();
-    if (done) return value;
-    onProgress?.(value.done, value.total);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-}
-
-/**
- * 比の探索本体（ジェネレータ）。格子の1点ごとに進捗を yield し、最後に結果を return する。
- * coarseSide: 相関を取る縮小寸法。120 で 400 の約 15 倍速く、比の分解能は
- * サブセットの物理的な広がりで決まるので落ちない。
- */
-function* lensRatioSearch(wide, other, options = {}) {
-  const { minRatio = 0.3, maxRatio = 8, steps = 90, coarseSide = 120 } = options;
-  const evalAt = (r) => {
-    let a, b;
-    if (r >= 1) {
-      // other が寄っている: other を 1/r に縮めて、wide の中央を同じ大きさで切る
-      b = resample(other, 1 / r);
-      a = centerCrop(wide, b.width, b.height);
-    } else {
-      a = resample(wide, r);
-      b = centerCrop(other, a.width, a.height);
-    }
-    if (Math.min(a.width, a.height, b.width, b.height) < 40) return -1;
-    const s = estimateGlobalShift(a, b, downsample,
-      { maxShiftPx: Math.floor(Math.min(a.width, a.height) / 8), coarseSide });
-    return s.confidence;
-  };
-
-  const logMin = Math.log(minRatio);
-  const logMax = Math.log(maxRatio);
-  let best = { r: 1, z: -2 };
-  const grid = [];
-  for (let i = 0; i <= steps; i += 1) {
-    const r = Math.exp(logMin + (logMax - logMin) * (i / steps));
-    const z = evalAt(r);
-    grid.push({ r, z });
-    if (z > best.z) best = { r, z };
-    yield { done: i + 1, total: steps + 1 };
-  }
-  if (best.z < 0.35) return null;
-
-  // 最良点の両隣で放物線内挿（対数比で）
-  const k = grid.findIndex((g) => g.r === best.r);
-  if (k > 0 && k < grid.length - 1) {
-    const l = grid[k - 1].z, m = grid[k].z, rr = grid[k + 1].z;
-    const denom = l - 2 * m + rr;
-    if (Math.abs(denom) > 1e-9) {
-      const d = Math.max(-0.5, Math.min(0.5, 0.5 * (l - rr) / denom));
-      const step = (logMax - logMin) / steps;
-      best.r = Math.exp(Math.log(best.r) + d * step);
-    }
-  }
-  return { ratio: best.r, zncc: best.z };
 }

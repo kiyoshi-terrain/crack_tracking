@@ -19,12 +19,17 @@ import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparep
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 import {
   initCapturePanel, toggleLive, liveActive, sessionActive,
-  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom, lensFactorOf,
+  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
 import { APP_VERSION } from './version.js';
 
 const $ = (id) => document.getElementById(id);
+
+// 版の食い違い検知の目印（index.html の素のスクリプトが読む）。
+// import が全部解決してここまで来られたことの証明なので、必ず最初に立てる。
+// 立たなければ「新しい HTML ＋ 古いモジュール」か、起動時の例外
+window.__JS_VERSION = APP_VERSION;
 
 const state = {
   files: [],       // {file, exif, imageData, url, quality, focus}
@@ -228,7 +233,7 @@ function nextAction() {
   if (state.lensMultiplier && state.lensMultiplier.kind !== 'wide' && state.lensMultiplier.factor == null) {
     return 'このレンズの倍率が未実測です。広角に戻してからもう一度切り替えると自動で測ります（望遠は手入力も可）';
   }
-  if (currentGSD() == null) return 'スケールを決めると mm で出ます（未入力でも px では出ます）';
+  if ((currentGSD() ?? (liveActive() ? liveGSD() : null)) == null) return 'スケールを決めると mm で出ます（未入力でも px では出ます）';
   return 'σ を押すと実測します';
 }
 
@@ -236,7 +241,10 @@ function nextAction() {
 
 function updateSteps() {
   const n = state.files.length;
-  const gsd = currentGSD();
+  // 写真が無くてもライブ中なら、いま映っているレンズと距離で分解能が出せる。
+  // 出さないと「距離も焦点距離も入れたのに — のまま」になり、
+  // その場で撮る意味があるかを撮る前に判断できない
+  const gsd = currentGSD() ?? (liveActive() ? liveGSD() : null);
   const latest = state.files[n - 1];
   const cloudScale = cloudState.scale;
 
@@ -296,10 +304,11 @@ function renderLensBar() {
   const items = ls.lenses.map((l) => {
     seen[l.kind] = (seen[l.kind] ?? 0) + 1;
     const active = l.deviceId === ls.activeDeviceId && !zoomOn;
-    const factor = l.kind === 'wide' ? 1 : (l.deviceId === ls.activeDeviceId ? ls.factor : lensFactorOf(l.deviceId));
+    // 広角は 1×。それ以外の倍率は端末からは取れないので、スケールシートの入力値を出す
+    const factor = factorOf(l.kind);
     let name = names[l.kind];
     if (seen[l.kind] > 1) name += ` ${seen[l.kind]}`;
-    const value = factor != null ? fmt(factor) : '未実測';
+    const value = factor != null ? fmt(factor) : '焦点距離 未入力';
     return `<button class="lens${active ? ' on' : ''}${factor == null ? ' unknown' : ''}" data-lens="${l.deviceId}">`
       + `<small>${name}</small>${value}</button>`;
   });
@@ -317,17 +326,17 @@ function renderLensBar() {
   const zoom = ls.zoom?.value || 1;
   let caption;
   let captionKind = 'ok';
-  if (ls.calibrating) {
-    caption = `使用中 <b>${activeName}</b> 倍率を実測中…`;
-    captionKind = 'warn';
-  } else if (ls.factor == null) {
-    caption = `使用中 <b>${activeName}</b> 倍率 未実測<br>広角に戻してから${activeName}を押し直すと実測します`;
+  const m = lensMultiplierNow();
+  if (!(m.focal > 0)) {
+    caption = `使用中 <b>${activeName}</b> 焦点距離が未入力`
+      + `<br>スケールで「35mm換算焦点距離 — ${activeName}」を入れると mm で出ます`;
     captionKind = 'warn';
   } else {
-    const total = ls.factor * zoom;
-    caption = `使用中 <b>${activeName} ${fmt(total)}</b>`
-      + (zoom > 1.05 ? `（${fmt(ls.factor)} × デジタル ${fmt(zoom)}）` : '')
-      + (ls.activeKind !== 'wide' ? ' 実測' : '');
+    const eff = m.focal * zoom;
+    caption = `使用中 <b>${activeName}`
+      + (m.factor != null ? ` ${fmt(m.factor * zoom)}` : '')
+      + `</b> <span class="mono">${eff.toFixed(0)}mm</span>`
+      + (zoom > 1.05 ? '（センサークロップ 2×）' : '');
   }
   bar.innerHTML = `<div class="lens-caption" data-kind="${captionKind}">${caption}</div>`
     + `<div class="lens-pills">${items.join('')}</div>`;
@@ -448,7 +457,7 @@ function setupScale() {
   updateGSD();
 }
 
-for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
+for (const id of ['distance', 'focal35', 'referenceLength', 'focalTele', 'focalUltra']) {
   $(id).addEventListener('input', () => { refreshCloudScale(); updateGSD(); });
 }
 $('referencePair').addEventListener('change', updateGSD);
@@ -483,10 +492,11 @@ function currentGSD() {
  */
 function effectiveFocal35() {
   const base = parseFloat($('focal35').value);
-  if (!(base > 0)) return null;
   const m = state.lensMultiplier;
-  if (!m) return base;
-  return m.factor != null ? base * m.factor * (m.zoom || 1) : null;
+  // 写真（EXIF あり）は入力値そのまま。ライブのフレームは撮ったレンズの
+  // 焦点距離 × デジタルズーム（2× は広角センサーの切り出しなので焦点距離2倍と同じ）
+  if (!m) return base > 0 ? base : null;
+  return m.focal > 0 ? m.focal * (m.zoom || 1) : null;
 }
 
 /** ライブ映像の GSD。距離 × 焦点距離（いまのレンズ・ズーム）だけで決める。 */
@@ -494,28 +504,38 @@ function liveGSD() {
   const video = document.getElementById('liveVideo');
   if (!video || !(video.videoWidth > 0)) return null;
   const distance = parseFloat($('distance').value);
-  const base = parseFloat($('focal35').value);
   const m = lensMultiplierNow();
-  if (!(distance > 0) || !(base > 0) || m.factor == null) return null;
+  if (!(distance > 0) || !(m.focal > 0)) return null;
   const focalPx = focalLengthPxFrom35mm({
-    focal35mm: base * m.factor * (m.zoom || 1),
+    focal35mm: m.focal * (m.zoom || 1),
     imageWidthPx: Math.max(video.videoWidth, video.videoHeight),
   });
   return computeGSD({ distanceM: distance, focalLengthPx: focalPx });
 }
 
-/** いまのレンズの倍率。望遠は入力必須（無ければ null → mm が出ず、その理由を出す）。 */
+/**
+ * レンズごとの 35mm 換算焦点距離[mm]。倍率を推し量るのではなく、
+ * メーカーが公表している数値をそのまま使う。mm/px は結局これだけで決まる。
+ */
+function focalOf(kind) {
+  const id = kind === 'tele' ? 'focalTele' : kind === 'ultra' ? 'focalUltra' : 'focal35';
+  const f = parseFloat($(id).value);
+  return f > 0 ? f : null;
+}
+
+/** 表示用の倍率（広角比）。広角の値が無ければ出さない。 */
+function factorOf(kind) {
+  const f = focalOf(kind);
+  const wide = focalOf('wide');
+  if (!(f > 0) || !(wide > 0)) return kind === 'wide' && f > 0 ? 1 : null;
+  return f / wide;
+}
+
+/** いまのレンズの状態。焦点距離が未入力なら null（mm が出ず、その理由を出す）。 */
 function lensMultiplierNow() {
   const ls = lensState();
   const zoom = ls.zoom?.value || 1;
-  // 実測値（広角→切替時にアプリが測った比）を最優先。無ければ手入力（望遠のみ）
-  if (ls.factor != null) return { kind: ls.activeKind, factor: ls.factor, zoom, measured: ls.activeKind !== 'wide' };
-  if (ls.activeKind === 'tele') {
-    const f = parseFloat($('teleFactor').value);
-    return { kind: 'tele', factor: f > 0 ? f : null, zoom, measured: false };
-  }
-  if (ls.activeKind === 'ultra') return { kind: 'ultra', factor: null, zoom, measured: false };
-  return { kind: 'wide', factor: 1, zoom, measured: false };
+  return { kind: ls.activeKind, focal: focalOf(ls.activeKind), factor: factorOf(ls.activeKind), zoom };
 }
 
 function updateGSD() {
@@ -614,11 +634,11 @@ $('baselineSaveBtn').addEventListener('click', async () => {
 const SCALE_KEY = 'sigma-scale-inputs';
 try {
   const saved = JSON.parse(localStorage.getItem(SCALE_KEY)) || {};
-  for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
+  for (const id of ['distance', 'focal35', 'referenceLength', 'focalTele', 'focalUltra']) {
     if (saved[id] && !$(id).value) $(id).value = saved[id];
   }
 } catch { /* プライベートモード等では記憶しないだけ */ }
-for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
+for (const id of ['distance', 'focal35', 'referenceLength', 'focalTele', 'focalUltra']) {
   $(id).addEventListener('input', () => {
     try {
       const saved = JSON.parse(localStorage.getItem(SCALE_KEY)) || {};
@@ -627,6 +647,16 @@ for (const id of ['distance', 'focal35', 'referenceLength', 'teleFactor']) {
     } catch { /* 同上 */ }
   });
 }
+
+// 仕様値をまとめて入れる。推測しないための入り口で、値の出どころは Apple の公表値
+$('presetIphone16Pro').addEventListener('click', () => {
+  const preset = { focal35: '24', focalTele: '120', focalUltra: '13' };
+  for (const [id, v] of Object.entries(preset)) {
+    $(id).value = v;
+    $(id).dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  updateGSD();
+});
 
 initShell();
 updateSteps();
@@ -665,8 +695,8 @@ function renderDiagnostics() {
     `画面 ${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio}`,
     `ライブ ${liveActive() ? 'on' : 'off'}`,
     ...(ls ? [
-      `レンズ ${ls.lenses.length}: ${ls.lenses.map((l) => `${l.kind}「${l.label || '(無名)'}」${lensFactorOf(l.deviceId) ?? '未実測'}×`).join(' / ')}`,
-      `使用中 ${ls.activeKind} 倍率 ${ls.factor ?? '未実測'} ズーム ${ls.zoom ? `${ls.zoom.value} (最大 ${ls.zoom.max})` : '非対応'}`,
+      `レンズ ${ls.lenses.length}: ${ls.lenses.map((l) => `${l.kind}「${l.label || '(無名)'}」`).join(' / ')}`,
+      `使用中 ${ls.activeKind} 焦点距離 ${focalOf(ls.activeKind) ?? '未入力'}mm ズーム ${ls.zoom ? `${ls.zoom.value} (最大 ${ls.zoom.max})` : '非対応'}`,
       `映像 ${document.getElementById('liveVideo')?.videoWidth ?? 0}×${document.getElementById('liveVideo')?.videoHeight ?? 0}`,
     ] : []),
     `写真 ${state.files.length} 枚 / 焦点距離 ${effectiveFocal35() ?? '—'} / GSD ${currentGSD()?.toFixed(4) ?? '—'}`,
