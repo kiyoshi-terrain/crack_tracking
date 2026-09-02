@@ -21,6 +21,7 @@
 import { measureDisplacementField, estimateGlobalShift } from './dic.js';
 import { fitAffine, fitHomography, applyAffine, applyHomography, residuals } from './transform.js';
 import { undistortPoint, isIdentity } from './lenscal.js';
+import { cellGeometry, correctParallax, leverageQuality } from './parallax.js';
 
 function median(values) {
   if (!values.length) return 0;
@@ -236,6 +237,9 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     // 影の縁の判定。サブセット内で 2時期の明るさの比がこの割合を超えて
     // ばらついたら、そのセルの変位は信用しない
     illuminationTolerance = 0.13,
+    // 視差補正。点群があるときだけ効く。
+    // {camera, plane, intrinsics, heightAt, unitScaleToMM, minCoverage, minSpread}
+    parallax = null,
     // レンズ歪み係数（lenscal.estimateDistortion の戻り値）。
     // 与えると、当てはめの前に対応を理想（ピンホール）座標へ移す
     lens = null,
@@ -457,13 +461,24 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
         du, dv,
         magnitudePx: magnitude,
         sePx: se,
-        // 相関が切れかけのセル、影の縁をまたいだセルの変位は信用しない
-        //（半端に掴んだ値が跳ねる）
-        significant: !decorrelated && !illuminationChanged && se > 0 && magnitude > k * se,
       };
     }
 
     cells.push(cell);
+  }
+
+  // 視差の補正。立ち位置がずれると、面から出っ張った部分だけが余分に動く。
+  // 段階1のホモグラフィは平面しか合わせられないので、ここまでの残差には
+  // それが残ったまま（5m・凹凸20mm・横20cm のずれで 0.54mm ＝ 限界の5倍）
+  const parallaxSummary = parallax ? applyParallax(cells, parallax, { useHomography }) : null;
+
+  // 有意判定。相関が切れかけのセル、影の縁をまたいだセルの変位は信用しない
+  //（半端に掴んだ値が跳ねる）。視差を引いた分の推定誤差も限界に足す
+  for (const c of cells) {
+    if (c.du == null) continue;
+    const se = Math.hypot(c.sePx, c.parallaxSePx ?? 0);
+    c.limitPx = k * se;
+    c.significant = !c.decorrelated && !c.illuminationChanged && se > 0 && c.magnitudePx > c.limitPx;
   }
 
   // 変質セルに隣接するセルの「変位」は信用しない。サブセット半径は測点間隔と
@@ -495,6 +510,8 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     step,
     cells,
     frames: frameSummaries,
+    // 視差補正の顛末。効かせられなかったときも理由を持って返す（黙らない）
+    parallax: parallaxSummary,
     // その場で実測された1セルの時期またぎノイズ（中央値）。
     // これがこの比較の「担保された精度」そのもの
     sigmaCrossPx: spreads.length ? spreads[spreads.length >> 1] : null,
@@ -504,11 +521,41 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       significant: significantCells.length,
       decorrelated: decorrelatedCells.length,
       illuminationChanged: cells.filter((c) => c.illuminationChanged).length,
+      parallaxCorrected: cells.filter((c) => c.parallaxCorrected).length,
       maxMagnitudePx: significantCells.length
         ? Math.max(...significantCells.map((c) => c.magnitudePx))
         : 0,
     },
   };
+}
+
+/**
+ * 点群から視差を計算して差し引く。
+ *
+ * 効かせられないときは**理由を持って断る**。凹凸が画面の一部にしか無いと、
+ * そこに載っているセルの大半が本物に動いたブロックだったときに、当てはめが
+ * 本物を視差と誤って説明してしまう（合成検証で 1.0mm の本物を丸ごと消した）。
+ */
+function applyParallax(cells, config, { useHomography }) {
+  const {
+    camera, plane, intrinsics, heightAt, unitScaleToMM = 1000,
+    // しきい値は合成検証から。凹凸が1ブロックだけの盤面が coverage 0.17〜0.19 /
+    // spread 0.45〜0.48、全面がざらついた盤面が 1.0 近辺
+    minCoverage = 0.4, minSpread = 0.6,
+  } = config;
+  if (!camera || !plane || !intrinsics || typeof heightAt !== 'function') {
+    return { ok: false, reason: '視差の補正に必要な点群の情報が足りません' };
+  }
+  const geo = cellGeometry(cells, { camera, plane, intrinsics, heightAt, unitScaleToMM });
+  const quality = leverageQuality(geo, cells);
+  if (quality.coverage < minCoverage || quality.spread < minSpread) {
+    return {
+      ok: false,
+      quality,
+      reason: '凹凸が画面の一部に偏っているため、視差と本物の変位を分離できません',
+    };
+  }
+  return { ...correctParallax(cells, geo, { useHomography }), quality };
 }
 
 /**

@@ -590,3 +590,37 @@ export function decimate(points, maxPoints) {
   }
   return out;
 }
+
+/**
+ * 面外マップを世界座標で読む。
+ *
+ * 写真の画素から飛ばした光線が平面に当たった点で「そこは面からどれだけ
+ * 手前か」を知りたい、という用途（視差補正）のための逆引き。
+ * セル中心での双一次補間。欠測セルは重みから外し、四隅とも欠測なら null。
+ *
+ * @returns {number|null} 面外の高さ（点群と同じ単位・手前が正）
+ */
+export function sampleOutOfPlane(map, x, y, z) {
+  const { e1, e2, cols, rows, cellSize, originU, originV, values } = map;
+  const u = (x * e1[0] + y * e1[1] + z * e1[2] - originU) / cellSize - 0.5;
+  const v = (x * e2[0] + y * e2[1] + z * e2[2] - originV) / cellSize - 0.5;
+  const c0 = Math.floor(u), r0 = Math.floor(v);
+  const tu = u - c0, tv = v - r0;
+
+  let sum = 0, wsum = 0;
+  for (let dr = 0; dr <= 1; dr += 1) {
+    for (let dc = 0; dc <= 1; dc += 1) {
+      const c = c0 + dc, r = r0 + dr;
+      if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+      const val = values[r * cols + c];
+      if (!Number.isFinite(val)) continue;
+      const w = (dc ? tu : 1 - tu) * (dr ? tv : 1 - tv);
+      if (!(w > 0)) continue;
+      sum += w * val;
+      wsum += w;
+    }
+  }
+  // 四隅のうち一部しか無いときは残った重みで正規化する。端のセルで
+  // 黙って 0 を返すと「出っ張っていない」と誤って補正が緩む
+  return wsum > 0.2 ? sum / wsum : null;
+}

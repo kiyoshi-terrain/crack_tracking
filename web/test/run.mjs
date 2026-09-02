@@ -17,6 +17,7 @@ import { runCloudChangeTests } from './cloudchange.mjs';
 import { runCaptureTests } from './capture.mjs';
 import { runLensCalTests } from './lenscal.mjs';
 import { runCloudAlignTests } from './cloudalign.mjs';
+import { runParallaxTests } from './parallax.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -237,6 +238,7 @@ runCloudChangeTests(check, near);
 runCaptureTests(check, near);
 runLensCalTests(check, near);
 runCloudAlignTests(check, near);
+runParallaxTests(check, near);
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

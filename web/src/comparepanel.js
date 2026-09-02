@@ -28,6 +28,7 @@ let getFrames = () => [];
 let getGsd = () => null;
 let getRoi = () => null;
 let getLens = () => null;
+let getSurface = () => null;
 let onChange = () => {};
 let baseFiles = [];
 let lastOutcome = null;   // 'changed' | 'surface' | 'quiet' | null
@@ -37,6 +38,7 @@ export function initComparePanel(options = {}) {
   getGsd = options.getGsd ?? (() => null);
   getRoi = options.getRoi ?? (() => null);
   getLens = options.getLens ?? (() => null);
+  getSurface = options.getSurface ?? (() => null);
   onChange = options.onChange ?? (() => {});
 
   $('compareLoad').addEventListener('click', () => $('compareInput').click());
@@ -200,6 +202,8 @@ async function run() {
       // 4000px 級では段階1を縮小画像で回す
       coarseScale: Math.max(1, Math.round(grayA.width / 1000)),
       lens: getLens?.() ?? null,
+      // 立ち位置が違うと、面から出た所だけが余分に動く。点群があれば計算して引く
+      parallax: getSurface?.(grayA.width, grayA.height) ?? null,
       yieldBetweenFrames: tick,
       onFrame: (i, n) => status(`<p class="note">比較中… ${i + 1} / ${n} 枚</p>`),
     });
@@ -262,6 +266,28 @@ function render(result, grayA, context) {
       + `</div></div>`;
   }
 
+  // 立ち位置のずれが作る「見かけの変位」。点群があるときだけ扱える。
+  // 効かせられなかったときも黙らない — 未補正と補正済みは違う
+  const px = result.parallax;
+  if (px?.ok && px.applied) {
+    const cm = px.shiftMagnitudeMM / 10;
+    verdict += `<div class="banner good"><div><b>立ち位置のずれを補正しました</b><br>`
+      + `点群の凹凸から、前回との立ち位置の差を <b>${cm.toFixed(0)}cm</b> と推定し`
+      + `（右 ${(px.shiftMM.x / 10).toFixed(0)}・下 ${(px.shiftMM.y / 10).toFixed(0)}・前 ${(px.shiftMM.z / 10).toFixed(0)} cm）、`
+      + `${px.corrected} セルから視差を差し引きました。`
+      + (px.afterRmsPx != null && px.beforeRmsPx != null
+        ? `残差 ${toMM(px.afterRmsPx)}（補正前 ${toMM(px.beforeRmsPx)}）。` : '')
+      + `</div></div>`;
+  } else if (px && !px.ok) {
+    verdict += `<div class="banner warn"><div><b>視差は補正していません</b><br>`
+      + `${escapeHtml(px.reason)}。立ち位置が前回とずれていると、面から出っ張った所だけが`
+      + `余分に動いて見えます（5m・凹凸20mm・横20cm で 0.5mm 級）。`
+      + `凹凸の上の有意セルは、進行と決めつけずに写真で確かめてください。</div></div>`;
+  } else if (!px) {
+    verdict += `<p class="note">点群を読み込むと、立ち位置のずれが作る`
+      + `見かけの変位（視差）を差し引けます。同じ位置に立てない現場ほど効きます。</p>`;
+  }
+
   // ── 数値
   const cells = [
     ['時期またぎ σ', result.sigmaCrossPx != null ? toMM(result.sigmaCrossPx) : '—',
@@ -275,6 +301,8 @@ function render(result, grayA, context) {
     ['有意に動いた', String(result.stats.significant), 'セル'],
     ['表面の変質', String(result.stats.decorrelated), 'セル'],
     ['影で判定できず', String(result.stats.illuminationChanged ?? 0), 'セル'],
+    ['視差を補正', px?.ok && px.applied ? String(result.stats.parallaxCorrected ?? 0) : '—',
+      px?.ok && px.applied ? `立ち位置のずれ ${(px.shiftMagnitudeMM / 10).toFixed(0)}cm` : '点群が要ります'],
   ];
   $('compareStats').innerHTML =
     `<div class="stats">${cells.map(([k, v, sub]) =>

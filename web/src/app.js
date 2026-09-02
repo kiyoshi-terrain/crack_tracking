@@ -14,6 +14,7 @@ import { speckleQuality, focusScore } from './speckle.js';
 import { detectTargets, matchTargets, pairwiseDistances } from './targets.js';
 import { estimateDistortion, orderGrid, gridWorld, isIdentity } from './lenscal.js';
 import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloudpanel.js';
+import { sampleOutOfPlane } from './pointcloud.js';
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
 import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
 import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparepanel.js';
@@ -689,17 +690,21 @@ function gsdSourceName() {
  * 点群パネルに渡すカメラ内部パラメータ。
  * 焦点距離は EXIF（または手入力）由来なので、写真が無い間は null を返す。
  */
-function cameraIntrinsics() {
-  if (!state.files.length) return null;
+function cameraIntrinsicsFor(width, height) {
   const focal35 = effectiveFocal35();
-  if (!(focal35 > 0)) return null;
-  const { width, height } = state.files[0].imageData;
+  if (!(focal35 > 0) || !(width > 0) || !(height > 0)) return null;
   const focalLengthPx = focalLengthPxFrom35mm({
     focal35mm: focal35,
     imageWidthPx: Math.max(width, height),
   });
   if (!(focalLengthPx > 0)) return null;
   return { focalLengthPx, cx: width / 2, cy: height / 2, width, height };
+}
+
+function cameraIntrinsics() {
+  if (!state.files.length) return null;
+  const { width, height } = state.files[0].imageData;
+  return cameraIntrinsicsFor(width, height);
 }
 
 initCloudPanel({
@@ -718,6 +723,19 @@ initComparePanel({
   getGsd: () => currentGSD(),
   getRoi: () => state.roi,
   getLens: () => lensForCurrentPhotos(),
+  // 視差補正の材料。基準画像は今回の写真と画素数が違うことがあるので、
+  // 内部パラメータはそのつど基準画像の寸法で組み直す
+  getSurface: (width, height) => {
+    const { plane, camera, map, unit } = cloudState;
+    if (!plane || !camera || !map || !unit) return null;
+    const intrinsics = cameraIntrinsicsFor(width, height);
+    if (!intrinsics) return null;
+    return {
+      camera, plane, intrinsics,
+      unitScaleToMM: unit.scale,
+      heightAt: (p) => sampleOutOfPlane(map, p[0], p[1], p[2]),
+    };
+  },
   onChange: updateSteps,
 });
 
