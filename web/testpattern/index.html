@@ -42,6 +42,11 @@
   .readout { font-family: SFMono-Regular, Menlo, monospace; font-size: 26px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12.5px; color: var(--ink-dim); }
   a { color: var(--amber); }
+  .verdict { border-radius: 10px; padding: 12px 14px; border: 1px solid; font-size: 13px; line-height: 1.6; }
+  .verdict.good { border-color: rgba(94,196,138,.45); background: rgba(94,196,138,.08); }
+  .verdict.warn { border-color: rgba(217,154,43,.45); background: rgba(217,154,43,.08); }
+  .verdict.bad  { border-color: rgba(201,86,78,.45);  background: rgba(201,86,78,.08); }
+  .verdict b { display: block; margin-bottom: 4px; }
 
   /* ── 撮影モード: 画面いっぱいにパターンを出す ───────────────── */
   body.shooting .wrap { display: none; }
@@ -114,8 +119,23 @@
     </div>
   </div>
 
+  <h2>模様を実物にする</h2>
+  <div class="card">
+    <p class="note">合成の斑点でも動作は確かめられますが、<b>実際に測る石の写真</b>を使うほうが意味があります。
+       大谷石ならミソと粒状組織が DIC の手がかりになるので、その肌が模様として足りているかを
+       現地に行く前に確かめられます。</p>
+    <div class="steps">
+      <button id="pickImage">画像を選ぶ（大谷石など）</button>
+      <button id="clearImage">合成の斑点に戻す</button>
+    </div>
+    <input type="file" id="imageInput" accept="image/*" hidden>
+    <div id="imageInfo" class="note" style="margin-top:10px">いまは合成の斑点を使っています。</div>
+    <div id="imageVerdict" style="margin-top:10px"></div>
+  </div>
+
   <h2>3. 手順</h2>
   <ol>
+    <li>測る石の写真があれば「模様を実物にする」で読み込む（無ければ合成の斑点のまま）</li>
     <li>この画面を<b>ノートPCや外部モニタ</b>に出し、明るさを固定する（自動調光を切る）</li>
     <li>スマホを<b>三脚か台に固定</b>し、画面から 0.5〜1.5m。パターンが画面いっぱいに写る距離で</li>
     <li>ずらす量 <span class="mono">0</span> のまま、σ実測ツールで<b>基準セット</b>を撮る（σ が収束するまで自動）</li>
@@ -178,6 +198,7 @@ for (const b of document.querySelectorAll('[data-step]')) {
 
 // 模様は一度だけ作って使い回す。描き直すたびに変わると2時期の比較にならない
 let pattern = null;
+let sourceImage = null;   // 読み込んだ実物の写真（あればこちらを使う）
 function buildPattern(w, h, grain) {
   const off = document.createElement('canvas');
   off.width = w; off.height = h;
@@ -199,13 +220,26 @@ function buildPattern(w, h, grain) {
   return off;
 }
 
+// 読み込んだ写真を画面いっぱいに敷く（縦横比は保つ）
+function fitImage(img, w, h) {
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const c = off.getContext('2d');
+  c.fillStyle = '#555';
+  c.fillRect(0, 0, w, h);
+  const scale = Math.max(w / img.width, h / img.height);
+  const dw = img.width * scale, dh = img.height * scale;
+  c.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  return off;
+}
+
 function draw() {
   const dpr = window.devicePixelRatio || 1;
   const w = Math.round(window.innerWidth * dpr);
   const h = Math.round(window.innerHeight * dpr);
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; pattern = null; }
   const grain = Math.max(3, Math.min(40, parseInt($('grain').value, 10) || 10)) * dpr;
-  if (!pattern) pattern = buildPattern(w, h, grain);
+  if (!pattern) pattern = sourceImage ? fitImage(sourceImage, w, h) : buildPattern(w, h, grain);
 
   const p = pitchMM();                       // CSS px あたりの mm
   const mm = parseFloat($('shiftMM').value) || 0;
@@ -234,6 +268,62 @@ function draw() {
 
   $('hudShift').textContent = mm.toFixed(2);
 }
+
+// 読み込んだ画像を、アプリ本体と同じ判定にかける。
+// 「その石が DIC の模様として足りているか」を現地に行く前に知るため
+async function judgeImage(canvas) {
+  const el = $('imageVerdict');
+  try {
+    const { toGray, downsample } = await import('../src/image.js');
+    const { speckleQuality, focusScore } = await import('../src/speckle.js');
+    const c2 = canvas.getContext('2d');
+    const gray = toGray(c2.getImageData(0, 0, canvas.width, canvas.height), null, 'luma', true);
+    const small = downsample(gray, Math.max(1, Math.round(canvas.width / 700)));
+    const q = speckleQuality(small, { subsetHalf: 9 });
+    const f = focusScore(small);
+    const kind = q.verdict === 'poor' ? 'bad' : q.verdict === 'fair' ? 'warn' : 'good';
+    const word = q.verdict === 'poor' ? '模様が足りません'
+      : q.verdict === 'fair' ? '模様はぎりぎりです' : '模様は十分です';
+    el.innerHTML = `<div class="verdict ${kind}"><b>${word}</b>
+      MIG <span class="mono">${q.mig.toFixed(4)}</span>　
+      ピント <span class="mono">${f.toFixed(3)}</span><br>
+      <span class="note">${q.reason}</span><br>
+      <span class="note">この判定はアプリ本体と同じものです。ただし画面越しに撮ると
+      コントラストが上がるので、現地の石はこれより不利になります。</span></div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="verdict bad"><b>判定できませんでした</b>${err.message}</div>`;
+  }
+}
+
+$('pickImage').addEventListener('click', () => $('imageInput').click());
+$('imageInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const bmp = await createImageBitmap(file);
+    sourceImage = bmp;
+    pattern = null;
+    $('imageInfo').textContent = `${file.name}（${bmp.width}×${bmp.height}）を模様に使います。`;
+    $('grain').disabled = true;
+    draw();
+    // 判定は画面に敷いたものではなく、元画像そのもので行う
+    const off = document.createElement('canvas');
+    off.width = bmp.width; off.height = bmp.height;
+    off.getContext('2d').drawImage(bmp, 0, 0);
+    await judgeImage(off);
+  } catch (err) {
+    $('imageInfo').textContent = `読み込めませんでした: ${err.message}`;
+  }
+});
+$('clearImage').addEventListener('click', () => {
+  sourceImage = null;
+  pattern = null;
+  $('grain').disabled = false;
+  $('imageInfo').textContent = 'いまは合成の斑点を使っています。';
+  $('imageVerdict').innerHTML = '';
+  draw();
+});
 
 function nudge(d) {
   const v = (parseFloat($('shiftMM').value) || 0) + d;
