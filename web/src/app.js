@@ -19,7 +19,7 @@ import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparep
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 import {
   initCapturePanel, toggleLive, liveActive, sessionActive,
-  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom,
+  startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom, requestZoom, currentZoomValue,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
 import { APP_VERSION } from './version.js';
@@ -290,6 +290,9 @@ function updateSteps() {
  * 望遠は分解能が焦点距離に比例して上がる（高所・遠方の主戦力）。
  * ズームはデジタルなので 2× までに絞り、その旨を出す。
  */
+// なぞってズームした直後の click を段の選択と誤解しないための旗
+let suppressClick = false;
+
 function renderLensBar() {
   const bar = $('lensBar');
   if (!bar) return;
@@ -342,8 +345,10 @@ function renderLensBar() {
   // （mm が要るのは σ を出すときで、それは HUD の分解能とヒントが受け持つ）
   const m = lensMultiplierNow();
   const activeLabel = label(ls.activeKind, nowZoom);
-  const caption = `使用中 <b>${names[ls.activeKind]}`
-    + (activeLabel === names[ls.activeKind] ? '' : ` ${activeLabel}`) + '</b>'
+  // 倍率が出せないレンズでも、ズーム中ならその値は出す（画角の手がかりを落とさない）
+  const shown = activeLabel !== names[ls.activeKind] ? ` ${activeLabel}`
+    : (nowZoom > 1.02 ? ` ズーム ${fmt(nowZoom)}` : '');
+  const caption = `使用中 <b>${names[ls.activeKind]}${shown}</b>`
     + (m.focal > 0
       ? ` <span class="mono">${(m.focal * nowZoom).toFixed(0)}mm</span>`
       : ' <button class="lens-fix" data-open-scale>mm 未設定</button>');
@@ -353,6 +358,7 @@ function renderLensBar() {
   bar.classList.remove('hidden');
 
   bar.querySelectorAll('[data-step]').forEach((b) => b.addEventListener('click', async () => {
+    if (suppressClick) { suppressClick = false; return; }
     const dev = b.dataset.device;
     const z = Number(b.dataset.zoom) || 1;
     try {
@@ -363,6 +369,111 @@ function renderLensBar() {
     }
   }));
   bar.querySelector('[data-open-scale]')?.addEventListener('click', () => openSheet('scale'));
+}
+
+// ═══════════════════════════════════════════ 連続ズーム（ピンチ・ダイヤル）
+//
+// 段のボタンだけでは画角を追い込めない。端末のカメラと同じく、
+// 映像をピンチ、ピルの帯を横になぞる、の2通りで連続的に変えられるようにする。
+//
+// 計測への影響: 拡大しても画素数は変わらないので、実際の情報が増えるのは
+// センサーを切り出せる範囲まで。それを超えると画が甘くなるが、σ は実測なので
+// 甘くなったぶん σ(px) も比例して大きくなり、mm 換算した最終値は変わらない。
+// 変わるのは画角だけ。ただし**縮尺は変わる**ので、計測中の変更は必ず弾く。
+
+/** 段の近くでは吸い付かせる（端末のカメラと同じ感触にする） */
+function snapZoom(z, max) {
+  for (const step of [1, 2, 3, 5, max]) {
+    if (step > 0 && Math.abs(z - step) / step < 0.04) return step;
+  }
+  return Math.round(z * 100) / 100;
+}
+
+function zoomBounds() {
+  const zr = lensState().zoom;
+  return zr ? { min: zr.min || 1, max: zr.max } : null;
+}
+
+/** ズームを相対倍率で動かす。計測中は理由を出して断る */
+function applyRelativeZoom(base, ratio) {
+  const b = zoomBounds();
+  if (!b) return;
+  if (sessionActive()) {
+    setViewfinderHint('計測中はズームを変えられません（縮尺が変わるため）。停止してから', 'warn');
+    return;
+  }
+  const z = snapZoom(Math.max(b.min, Math.min(b.max, base * ratio)), b.max);
+  requestZoom(z);
+}
+
+function initZoomGestures() {
+  const vf = $('viewfinder');
+  if (!vf) return;
+
+  // iOS Safari はピンチを gesture* で出す。preventDefault しないと頁が拡大する
+  let gestureBase = 1;
+  vf.addEventListener('gesturestart', (e) => {
+    if (!liveActive()) return;
+    e.preventDefault();
+    gestureBase = currentZoomValue();
+  });
+  vf.addEventListener('gesturechange', (e) => {
+    if (!liveActive()) return;
+    e.preventDefault();
+    applyRelativeZoom(gestureBase, e.scale);
+  });
+  vf.addEventListener('gestureend', (e) => { if (liveActive()) e.preventDefault(); });
+
+  // gesture* を出さない環境（Android・PC）用に、2本指の距離から自前で作る
+  const points = new Map();
+  let pinchStart = null;
+  const spread = () => {
+    const [a, b] = [...points.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  vf.addEventListener('pointerdown', (e) => {
+    if (!liveActive() || e.pointerType === 'mouse') return;
+    points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (points.size === 2) pinchStart = { dist: spread(), zoom: currentZoomValue() };
+  });
+  vf.addEventListener('pointermove', (e) => {
+    if (!points.has(e.pointerId)) return;
+    points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (points.size === 2 && pinchStart && pinchStart.dist > 0) {
+      e.preventDefault();
+      applyRelativeZoom(pinchStart.zoom, spread() / pinchStart.dist);
+    }
+  });
+  const drop = (e) => {
+    points.delete(e.pointerId);
+    if (points.size < 2) pinchStart = null;
+  };
+  vf.addEventListener('pointerup', drop);
+  vf.addEventListener('pointercancel', drop);
+
+  // ピルの帯を横になぞるとダイヤルになる（端末のカメラの長押しズームに相当）。
+  // ズームのたびに帯の中身は差し替わるので、handler は差し替わらない #lensBar に付ける。
+  // 内側に付けると、最初のズームで要素ごと消えて操作が切れる
+  const bar = $('lensBar');
+  let drag = null;
+  bar.addEventListener('pointerdown', (e) => {
+    if (!liveActive() || !lensState().zoom) return;
+    if (e.pointerType === 'mouse' && e.buttons !== 1) return;
+    drag = { x: e.clientX, zoom: currentZoomValue(), moved: false };
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    // 8px 未満の動きはタップ扱い。段の選択と両立させる
+    if (!drag.moved && Math.abs(dx) < 8) return;
+    if (!drag.moved) bar.setPointerCapture?.(e.pointerId);
+    drag.moved = true;
+    // 帯の幅ぶんなぞって約 2.7 倍。指の動きに対して素直な感触になる
+    applyRelativeZoom(drag.zoom, Math.exp(dx / 160));
+  });
+  const endDrag = () => { if (drag?.moved) suppressClick = true; drag = null; };
+  bar.addEventListener('pointerup', endDrag);
+  bar.addEventListener('pointercancel', endDrag);
 }
 
 function setNote(id, text) {
@@ -707,6 +818,7 @@ $('presetIphone16Pro').addEventListener('click', () => {
   updateGSD();
 });
 
+initZoomGestures();
 initShell();
 updateSteps();
 

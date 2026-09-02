@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v23">
+<html lang="ja" data-version="v24">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -112,6 +112,8 @@
   }
 
   /* ── ビューファインダー ─────────────────── */
+  /* ライブ中はピンチを頁の拡大に取られない。ズーム操作として受ける */
+  body.live-on .vf { touch-action: none; }
   .vf {
     grid-area: vf; position: relative; overflow: hidden;
     background: #000;

@@ -163,15 +163,52 @@ export async function switchLens(deviceId) {
  */
 export async function setZoom(z) {
   const track = stream?.getVideoTracks()[0];
+  // 計測中にズームを変えると1枚目と縮尺が違うフレームが混ざる。必ず弾く
   if (!track || session) return false;
+  const caps = track.getCapabilities?.().zoom;
+  const lo = caps?.min ?? 1;
+  const hi = caps?.max ?? 1;
+  const want = Math.max(lo, Math.min(hi, z));
   try {
-    await track.applyConstraints({ advanced: [{ zoom: z }] });
-    currentZoom = track.getSettings?.().zoom ?? z;
+    await track.applyConstraints({ advanced: [{ zoom: want }] });
+    // 要求値ではなく**実際に適用された値**を持つ。端末が丸めることがあり、
+    // 要求値で mm/px を計算すると縮尺がずれる
+    currentZoom = track.getSettings?.().zoom ?? want;
     deps.onStateChange?.();
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * 連続ズーム（ピンチ・ダイヤル用）。要求が来るたびに applyConstraints を
+ * 投げると詰まるので、実行中は最後の要求だけ覚えて追いかける。
+ */
+let zoomInFlight = false;
+let zoomQueued = null;
+export function requestZoom(z) {
+  if (session) return false;
+  zoomQueued = z;
+  if (zoomInFlight) return true;
+  (async () => {
+    zoomInFlight = true;
+    try {
+      while (zoomQueued != null) {
+        const next = zoomQueued;
+        zoomQueued = null;
+        await setZoom(next);
+      }
+    } finally {
+      zoomInFlight = false;
+    }
+  })();
+  return true;
+}
+
+/** いまのズーム値（適用済みの実値）。 */
+export function currentZoomValue() {
+  return currentZoom || 1;
 }
 
 export function stopLive() {
