@@ -347,11 +347,16 @@ export function fitWallPlane(points, options = {}) {
     if (!candidate) break;
     best = candidate;
 
-    // MAD で外れ値を落とす
-    const abs = [];
+    // MAD で外れ値を落とす。中心は符号付き残差の**中央値**。
+    // |残差| の中央値を中心にすると、片側に 3 割の外れ値（植生・隣の面）が
+    // あるとき当てはめごと引きずられて二群が重なり、誰も刈れないまま
+    // inlierRatio 1.0 で偏った面を返す
+    const signed = [];
     for (let i = 0, p = 0; p < points.length; i += 1, p += 3) {
-      abs.push(Math.abs(signedDistance(candidate, points[p], points[p + 1], points[p + 2])));
+      signed.push(signedDistance(candidate, points[p], points[p + 1], points[p + 2]));
     }
+    const centre = median(signed);
+    const abs = signed.map((d) => Math.abs(d - centre));
     const mad = median(abs) * 1.4826;
     if (!(mad > 0)) break;
     const limit = cutoff * mad;
@@ -448,10 +453,12 @@ function cross(a, b) {
  *                   既定は 1/6 相当の 0.05（メートル前提）ではなく明示指定を推奨。
  */
 export function outOfPlaneMap(points, plane, options = {}) {
-  const { cellSize, minPointsPerCell = 3 } = options;
+  const { cellSize, minPointsPerCell = 3, up = [0, 0, 1] } = options;
   if (!(cellSize > 0)) throw new Error('cellSize を指定してください');
 
-  const { e1, e2 } = planeBasis(plane.normal);
+  // 「上」はパネルの選択（Z up / Y up）に従う。既定の Z up のままだと ARKit 系
+  // （Y up）の点群で図が 90° 回り、選択を切り替えても何も変わらない
+  const { e1, e2 } = planeBasis(plane.normal, up);
 
   let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
   const n = points.length / 3;

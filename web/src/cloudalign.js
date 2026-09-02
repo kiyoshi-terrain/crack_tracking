@@ -401,9 +401,10 @@ export function c2cDistances(refPoints, movPoints, transform, options = {}) {
  * @param {object} transform 位置合わせ変換（mov を ref 系へ）
  */
 export function c2cHeatmap(movPoints, c2c, plane, transform, options = {}) {
-  const { cellSize, minPointsPerCell = 2 } = options;
+  const { cellSize, minPointsPerCell = 2, up = [0, 0, 1] } = options;
   if (!(cellSize > 0)) throw new Error('cellSize を指定してください');
-  const { e1, e2 } = planeBasisLocal(plane.normal);
+  // 平面法と同じ「上」を使う。揃えないと同じ壁の図が方式で向きが変わる
+  const { e1, e2 } = planeBasisLocal(plane.normal, up);
 
   const m = movPoints.length / 3;
   const us = new Float64Array(m);
@@ -422,25 +423,32 @@ export function c2cHeatmap(movPoints, c2c, plane, transform, options = {}) {
   const cols = Math.max(1, Math.ceil((maxU - minU) / cellSize));
   const rows = Math.max(1, Math.ceil((maxV - minV) / cellSize));
   const buckets = new Array(cols * rows);
+  // 対応の取れなかった点（今回にあって基準に無い）もセル単位で数える。
+  // 点数のままだと数十万点が「セル N 件」と表示され、桁も向きも嘘になる
+  const unmatched = new Int32Array(cols * rows);
   for (let i = 0; i < m; i += 1) {
-    if (!Number.isFinite(c2c.along[i])) continue;
     const cx = Math.floor((us[i] - minU) / cellSize);
     const cy = Math.floor((vs[i] - minV) / cellSize);
     if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) continue;
     const k = cy * cols + cx;
-    (buckets[k] || (buckets[k] = [])).push(c2c.along[i]);
+    if (Number.isFinite(c2c.along[i])) (buckets[k] || (buckets[k] = [])).push(c2c.along[i]);
+    else unmatched[k] += 1;
   }
   const values = new Float64Array(cols * rows).fill(NaN);
   const counts = new Int32Array(cols * rows);
-  for (let k = 0; k < buckets.length; k += 1) {
+  let missingCells = 0;
+  for (let k = 0; k < cols * rows; k += 1) {
     const b = buckets[k];
-    if (!b || b.length < minPointsPerCell) continue;
+    if (!b || b.length < minPointsPerCell) {
+      if (unmatched[k] >= minPointsPerCell) missingCells += 1;
+      continue;
+    }
     counts[k] = b.length;
     values[k] = median(b);
   }
   return {
     grid: { originU: minU, originV: minV, cellSize, cols, rows },
-    e1, e2, values, counts,
+    e1, e2, values, counts, missingCells,
   };
 }
 

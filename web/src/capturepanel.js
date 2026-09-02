@@ -16,7 +16,7 @@
 import { toGray, downsample } from './image.js';
 import { speckleQuality, focusScore } from './speckle.js';
 import { estimateGlobalShift } from './dic.js';
-import { shouldStop, frameGate, quickSigma, limitEstimate, estimateLensRatio } from './capture.js';
+import { shouldStop, frameGate, quickSigma, limitEstimate, estimateLensRatioAsync, resample } from './capture.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,6 +39,8 @@ const FACTORS_KEY = 'lens-factors';   // deviceId → 広角比の倍率（実�
 let lensFactors = {};
 try { lensFactors = JSON.parse(localStorage.getItem(FACTORS_KEY)) || {}; } catch { /* 記憶なし */ }
 let session = null;    // { frames: [{imageData, small, focus}], sigmas, limits, rejects, timer }
+let finishing = false; // セッション終了後、本解析へ渡し終わるまで true（二重起動を防ぐ）
+let starting = null;   // startLive の進行中 Promise（二重起動でストリームが漏れないように）
 let baseline = null;   // { small, bitmap, name } 再訪照合用
 let alignedStreak = 0;
 let autoArm = false;   // 照合が合ったら自動でセッションを始める
@@ -52,13 +54,18 @@ export function liveActive() {
 }
 
 export function sessionActive() {
-  return !!session;
+  return !!session || finishing;
 }
 
 /** ライブビューの入切。 */
 export async function toggleLive() {
+  if (starting) { await starting; return !!stream; }
   if (stream) { stopLive(); return false; }
-  await startLive();
+  // 起動中（許可ダイアログが出ている間）にもう一度呼ばれても2本目を開かない。
+  // 開くと最初のストリームが止められず、カメラが点いたまま・video が2枚・
+  // 判定タイマーが2本になる
+  starting = startLive().finally(() => { starting = null; });
+  await starting;
   return true;
 }
 
@@ -143,7 +150,10 @@ export async function switchLens(deviceId) {
   if (!stream || session || deviceId === activeDeviceId) return false;
   const fromKind = lensState().activeKind;
   const toKind = lenses.find((l) => l.deviceId === deviceId)?.kind ?? 'wide';
-  // 広角から別レンズへ移るとき、倍率が未実測なら切替前の画を取っておいて測る
+  // 広角から別レンズへ移るとき、倍率が未実測なら切替前の画を取っておいて測る。
+  // 広角側がデジタルズーム中なら、その分は倍率に戻して記録する（ズーム 2× の
+  // 画と比べて測った比は「広角 2× 比」なので、そのまま保存すると GSD が半分になる）
+  const wideZoom = currentZoom || 1;
   const wideFrame = fromKind === 'wide' && toKind !== 'wide' && lensFactors[deviceId] == null
     ? grabSmall(SMALL_WIDTH)?.gray : null;
 
@@ -157,7 +167,7 @@ export async function switchLens(deviceId) {
   try { localStorage.setItem(LENS_KEY, deviceId); } catch { /* 記憶できないだけ */ }
   deps.onStateChange?.();
 
-  if (wideFrame) calibrateLensFactor(deviceId, wideFrame);
+  if (wideFrame) calibrateLensFactor(deviceId, wideFrame, wideZoom);
   return true;
 }
 
@@ -165,7 +175,7 @@ export async function switchLens(deviceId) {
  * レンズ倍率の実測。切替直後の露出が落ち着くのを待ってから、
  * 広角の画と新レンズの画を比べる。機種名は Web から読めないので、測る。
  */
-async function calibrateLensFactor(deviceId, wideFrame) {
+async function calibrateLensFactor(deviceId, wideFrame, wideZoom = 1) {
   setLiveStatus('レンズの倍率を実測中… そのまま向けていてください', 'info');
   // 新しいストリームの最初のフレームが来るまで待つ（iOS は 1 秒以上かかることがある）。
   // 待たずに掴むと空フレームで黙って諦め、倍率が永遠に付かない
@@ -184,12 +194,22 @@ async function calibrateLensFactor(deviceId, wideFrame) {
     setLiveStatus('映像が来ないため倍率を測れませんでした。広角に戻してもう一度切り替えてください', 'warn');
     return;
   }
-  const est = estimateLensRatio(wideFrame, now);
+  // 望遠なら 1× 以上、超広角なら 1× 以下しかありえない。範囲を絞れば同じ密度で半分の時間
+  const kind = lenses.find((l) => l.deviceId === deviceId)?.kind;
+  const range = kind === 'tele' ? { minRatio: 1, maxRatio: 8, steps: 60 }
+    : kind === 'ultra' ? { minRatio: 0.3, maxRatio: 1, steps: 35 } : {};
+  const est = await estimateLensRatioAsync(wideFrame, now, range, (done, total) => {
+    setLiveStatus(`レンズの倍率を実測中… ${Math.round(100 * done / total)}%　そのまま向けていてください`, 'info');
+  });
+  if (activeDeviceId !== deviceId || !stream) return;   // 測っている間に切り替えられた
   if (!est) {
     setLiveStatus('倍率を実測できませんでした（模様が足りないか、壁がずれました）。広角に戻してもう一度切り替えてください', 'warn');
     return;
   }
-  lensFactors[deviceId] = Math.round(est.ratio * 100) / 100;
+  // 比は縮小画どうしで測っている。レンズごとに映像の解像度が違うと縮小率も違うので、
+  // 縮小前の幅の比で戻す。広角側のデジタルズーム分も戻す
+  const ratio = est.ratio * (wideFrame.width / now.width) * wideZoom;
+  lensFactors[deviceId] = Math.round(ratio * 100) / 100;
   try { localStorage.setItem(FACTORS_KEY, JSON.stringify(lensFactors)); } catch { /* 記憶できないだけ */ }
   const name = lenses.find((l) => l.deviceId === deviceId)?.kind === 'tele' ? '望遠' : '超広角';
   setLiveStatus(`${name}の倍率を実測: ${lensFactors[deviceId].toFixed(2)}×（広角比・相関 ${est.zncc.toFixed(2)}）`, 'good');
@@ -281,10 +301,14 @@ function liveCheck() {
   // 基準との照合。ずれの向きを矢印で出し、合ったら自動で計測を始める。
   // 探索半径はフレーム寸法の 1/8 に抑える。これより大きなずれは「まだ合っていない」
   // として扱えば十分で、半径を欲張ると縮小画像で探索点が全部画面外に落ちる
-  const shift = estimateGlobalShift(baseline.small, small.gray, downsample,
-    { maxShiftPx: Math.floor(Math.min(small.gray.width, small.gray.height) / 8) });
+  // 基準（静止画 4032 幅など）とライブ（3840 幅）は整数縮小の結果の幅が違うので、
+  // 幅を基準に揃えてから比べる。揃えないと 1 割の寸法差がそのまま相関を落とす
+  const live = Math.abs(small.gray.width - baseline.small.width) > 1
+    ? resample(small.gray, baseline.small.width / small.gray.width) : small.gray;
+  const shift = estimateGlobalShift(baseline.small, live, downsample,
+    { maxShiftPx: Math.floor(Math.min(live.width, live.height) / 8) });
   const off = Math.hypot(shift.dx, shift.dy);
-  const okDist = off < small.gray.width * 0.05;
+  const okDist = off < live.width * 0.05;
   const okConf = shift.confidence > 0.4;
 
   if (okDist && okConf) {
@@ -362,7 +386,7 @@ function setLiveStatus(text, kind) {
 
 /** 計測セッション。ライブでなければ false を返す（呼び出し側は従来動作へ）。 */
 export function startSession() {
-  if (!video || session) return false;
+  if (!video || session || finishing) return false;
   session = { frames: [], sigmas: [], limits: [], rejects: 0 };
   document.body.classList.add('session-on');
   setLiveStatus('計測 開始 · 動かさないでください', 'rec');
@@ -381,6 +405,16 @@ async function captureFrame() {
   // フル解像度で1枚
   const w = video.videoWidth;
   const h = video.videoHeight;
+  // 途中で端末を回すと縦横が入れ替わる。寸法の違うフレームを混ぜると相関は
+  // 端をクランプして「それらしい嘘の σ」を出すので、1枚目と違えば弾く
+  const first = session.frames[0]?.imageData;
+  if (first && (first.width !== w || first.height !== h)) {
+    session.rejects += 1;
+    setLiveStatus('画面の向きが変わりました — この1枚は使いません', 'warn');
+    const v = shouldStop(session.limits, { frames: session.frames.length, consecutiveRejects: session.rejects });
+    if (v.stop) endSession(v.reason);
+    return;
+  }
   const canvas = captureFrame.canvas ?? (captureFrame.canvas = document.createElement('canvas'));
   canvas.width = w;
   canvas.height = h;
@@ -407,10 +441,12 @@ async function captureFrame() {
 
     if (session.frames.length >= 2) {
       const ref = session.frames[0].small;
+      // 簡易 σ は縮小画で測っているので、縮小前の px に戻してから限界にする。
+      // 戻さないと「限界 … px」の表示が縮小率ぶん（4K なら 4 倍）小さく出る
       const sigma = quickSigma(ref, small);
-      if (sigma != null) session.sigmas.push(sigma);
+      if (sigma != null) session.sigmas.push(sigma * qFactor);
       const gsd = deps.getGsd?.();
-      const est = limitEstimate(session.sigmas, gsd ? gsd * session.frames[0].qFactor : null);
+      const est = limitEstimate(session.sigmas, gsd || null);
       if (est) {
         session.limits.push(est.mm ?? est.px);
         setLiveStatus(
@@ -435,9 +471,18 @@ async function endSession(reason) {
   clearInterval(session.timer);
   const frames = session.frames;
   session = null;
+  finishing = true;   // 本解析へ渡し終わるまで、次のセッションを始めさせない
   document.body.classList.remove('session-on');
   deps.onStateChange?.();
+  try {
+    await finishSession(reason, frames);
+  } finally {
+    finishing = false;
+    deps.onStateChange?.();
+  }
+}
 
+async function finishSession(reason, frames) {
   if (reason === 'quality') {
     setLiveStatus('条件が悪く、使える写真が続きませんでした。距離とピントを変えて撮り直してください', 'bad');
     if (frames.length < 2) return;
@@ -464,12 +509,17 @@ async function endSession(reason) {
   await deps.runAnalysis();
 }
 
+// canvas は1枚を使い回し、終わったら 0×0 にして裏の画素メモリを返す。
+// 4K の canvas を 15 枚作ると iOS Safari の canvas メモリ上限に当たってタブが落ちる
 function toJpeg(imageData, quality = 0.92) {
-  const canvas = document.createElement('canvas');
+  const canvas = toJpeg.canvas ?? (toJpeg.canvas = document.createElement('canvas'));
   canvas.width = imageData.width;
   canvas.height = imageData.height;
   canvas.getContext('2d').putImageData(imageData, 0, 0);
   return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('JPEG 化に失敗しました'))), 'image/jpeg', quality);
+    canvas.toBlob((b) => {
+      canvas.width = canvas.height = 0;
+      if (b) resolve(b); else reject(new Error('JPEG 化に失敗しました'));
+    }, 'image/jpeg', quality);
   });
 }

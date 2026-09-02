@@ -57,7 +57,9 @@ export function compareEpochs(before, after, k = 3) {
   const sb = after.pairSigmaMM;
   // null >= 0 は true になるので、比較演算子でガードしてはいけない。
   // 素通りすると σ が無いのに「有意」と表示される
-  if (!Number.isFinite(sa) || !Number.isFinite(sb) || sa < 0 || sb < 0) {
+  // σ が 0 以下も「測れていない」。0 を通すと限界 0・比 null のまま「有意」になり、
+  // 表示側が比を書式化するところで落ちる
+  if (!(sa > 0) || !(sb > 0)) {
     return { deltaMM, limitMM: null, significant: null, ratio: null };
   }
 
@@ -442,9 +444,12 @@ export function toCSV(stations) {
   const rows = [header];
 
   for (const station of stations) {
+    // 画面と同じく温度分離を効かせる。効かせないと、画面では「有意差なし」なのに
+    // 帳票だけ「有意」と書かれる（夏冬交互に測ると必ず起きる）
+    const trend = fitTrend(station.observations);
     station.observations.forEach((o, i) => {
       const prev = i > 0 ? station.observations[i - 1] : null;
-      const cmp = prev ? compareEpochs(prev, o) : null;
+      const cmp = prev ? compareEpochsWithTemperature(prev, o, trend) : null;
       rows.push([
         station.name, station.member, o.at,
         fmt(o.valueMM, 4),

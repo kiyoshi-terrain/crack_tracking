@@ -44,7 +44,7 @@ export function initComparePanel(options = {}) {
     );
     baseFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     $('compareBaseInfo').textContent = baseFiles.length
-      ? `${baseFiles.length} 枚（1枚目が基準、2枚目以降は基準日の σ に使います）`
+      ? `${baseFiles.length} 枚（1枚目が基準、2枚目を基準日の σ に使います）`
       : '';
     e.target.value = '';
     onChange();

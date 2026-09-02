@@ -474,6 +474,21 @@ function effectiveFocal35() {
   return m.factor != null ? base * m.factor * (m.zoom || 1) : null;
 }
 
+/** ライブ映像の GSD。距離 × 焦点距離（いまのレンズ・ズーム）だけで決める。 */
+function liveGSD() {
+  const video = document.getElementById('liveVideo');
+  if (!video || !(video.videoWidth > 0)) return null;
+  const distance = parseFloat($('distance').value);
+  const base = parseFloat($('focal35').value);
+  const m = lensMultiplierNow();
+  if (!(distance > 0) || !(base > 0) || m.factor == null) return null;
+  const focalPx = focalLengthPxFrom35mm({
+    focal35mm: base * m.factor * (m.zoom || 1),
+    imageWidthPx: Math.max(video.videoWidth, video.videoHeight),
+  });
+  return computeGSD({ distanceM: distance, focalLengthPx: focalPx });
+}
+
 /** いまのレンズの倍率。望遠は入力必須（無ければ null → mm が出ず、その理由を出す）。 */
 function lensMultiplierNow() {
   const ls = lensState();
@@ -547,7 +562,9 @@ initCloudDiffPanel({
 initCapturePanel({
   setFrames: setLiveFrames,
   runAnalysis: runMeasurement,
-  getGsd: () => currentGSD(),
+  // ライブ中は「いま映っているレンズ」の GSD。currentGSD() は前回読み込んだ写真セットの
+  // レンズで計算するので、望遠→広角と切り替えた直後の限界表示が倍率ぶん狂う
+  getGsd: () => (liveActive() ? liveGSD() : currentGSD()),
   onStateChange: updateSteps,
   // ライブ中はスコープ帯をライブ映像の判定で上書きする
   onLiveQuality: ({ quality, focus }) => {
@@ -655,9 +672,11 @@ async function autoStartLive() {
 }
 autoStartLive();
 
-// 裏に回ったらカメラを止める（電池）。戻ってきたら、写真を読み込んでいなければ再開
+// 裏に回ったらカメラを止める（電池）。戻ってきたら、写真を読み込んでいなければ再開。
+// 計測中でも止める。裏では映像が最後の1枚で止まったまま撮り続けて、同じ画が
+// 何枚も積まれ、σ がありえないほど小さく出る
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { if (liveActive() && !sessionActive()) stopLive(); }
+  if (document.hidden) { if (liveActive()) stopLive(); }
   else autoStartLive();
 });
 
@@ -788,6 +807,8 @@ async function runMeasurement() {
   $('progress').classList.remove('on');
   setProgress(0);
   $('run').disabled = false;
+  // 解析中に新しい版が入っていたら、終わってから切り替える
+  if (state.reloadPending) location.reload();
 }
 
 /**
@@ -918,7 +939,8 @@ function renderVerdict(dicStats, targetSigma) {
   const best = candidates.reduce((a, b) => (a.sigma <= b.sigma ? a : b));
   const limit = detectionLimit({ sigmaPx: best.sigma, millimetersPerPixel: gsd ?? 1, frames });
   state.measurement = gsd ? {
-    at: new Date().toISOString(),
+    // 先月撮った写真を今日解析しても、記録すべき日時は撮影日。EXIF があればそれ
+    at: exifDateISO(state.files[0]?.exif?.dateTimeOriginal) ?? new Date().toISOString(),
     gsd, frames,
     method: best.name,
     // 2時期を比べるときに必要なのは「1測点」ではなく「き裂を挟む2点」の σ
@@ -1157,6 +1179,14 @@ function drawField(field) {
 
 // ═══════════════════════════════════════════ 補助
 
+/** EXIF の "YYYY:MM:DD HH:MM:SS" を ISO 文字列に。読めなければ null。 */
+function exifDateISO(s) {
+  const m = /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(String(s ?? ''));
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
 function clampInt(value, min, max, fallback) {
   const n = parseInt(value, 10);
   return isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
@@ -1187,6 +1217,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
         let last = 0;
         try { last = Number(sessionStorage.getItem('sw-reloaded-at')) || 0; } catch { /* 記憶なし */ }
         if (Date.now() - last < 10000) return;
+        // 計測中・解析中に再読み込みすると撮った枚を捨てることになる。終わってから
+        if (sessionActive() || $('run').disabled) { state.reloadPending = true; return; }
         refreshing = true;
         try { sessionStorage.setItem('sw-reloaded-at', String(Date.now())); } catch { /* 記憶できないだけ */ }
         location.reload();

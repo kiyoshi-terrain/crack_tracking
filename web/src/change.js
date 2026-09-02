@@ -201,8 +201,14 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
 
     // 段階1: 粗い格子・広い窓で変換を掴む（coarseScale 指定時は縮小画像で）
     const smallF = coarseScale > 1 && downsample ? downsample(frame, coarseScale) : frame;
+    // 探索半径は縮小後の寸法に合わせる。縮小前の 400px をそのまま渡すと、
+    // 縮小画像では探索点が全部画面外に落ちて confidence 0 で黙り、
+    // 手持ちで 40px ずれただけで「相関が取れません」になる
     const shift = downsample
-      ? estimateGlobalShift(smallA, smallF, downsample, { maxShiftPx: 400 })
+      ? estimateGlobalShift(smallA, smallF, downsample, {
+        maxShiftPx: Math.min(Math.ceil(400 / coarseScale),
+          Math.floor(Math.min(smallA.width, smallA.height) / 8)),
+      })
       : { dx: 0, dy: 0 };
 
     // 探索窓も縮尺に合わせる。並進は段階0の全体シフトが受け持つので、

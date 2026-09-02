@@ -84,7 +84,11 @@ export function frameGate(candidate, acceptedFocuses) {
  */
 export function quickSigma(reference, target, options = {}) {
   const { subsetHalf = 10, step = 40, minPoints = 10 } = options;
-  const shift = estimateGlobalShift(reference, target, downsample, { maxShiftPx: 200 });
+  // 探索半径はフレーム寸法に比例させる。固定 200px だと 16:9 の縮小フレーム
+  // （960×540）で探索点が全部画面外に落ち、confidence 0 → σ が一度も出ず
+  // 収束しないまま上限枚数まで走る
+  const shift = estimateGlobalShift(reference, target, downsample,
+    { maxShiftPx: Math.floor(Math.min(reference.width, reference.height) / 8) });
   const field = measureDisplacementField(reference, target, {
     subsetHalf, step, searchRange: 3, minZNCC: 0.7, initialShift: shift,
   });
@@ -162,7 +166,35 @@ function centerCrop(image, w, h) {
  * @returns {{ratio: number, zncc: number}|null}
  */
 export function estimateLensRatio(wide, other, options = {}) {
-  const { minRatio = 0.3, maxRatio = 8, steps = 90 } = options;
+  const it = lensRatioSearch(wide, other, options);
+  for (;;) {
+    const { done, value } = it.next();
+    if (done) return value;
+  }
+}
+
+/**
+ * estimateLensRatio の非同期版。格子の1点ごとにイベントループへ戻すので、
+ * ライブ映像や操作を止めずに測れる（同期版は数秒〜数十秒メインスレッドを塞ぐ）。
+ * @param {(done:number, total:number)=>void} [onProgress]
+ */
+export async function estimateLensRatioAsync(wide, other, options = {}, onProgress = null) {
+  const it = lensRatioSearch(wide, other, options);
+  for (;;) {
+    const { done, value } = it.next();
+    if (done) return value;
+    onProgress?.(value.done, value.total);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+/**
+ * 比の探索本体（ジェネレータ）。格子の1点ごとに進捗を yield し、最後に結果を return する。
+ * coarseSide: 相関を取る縮小寸法。120 で 400 の約 15 倍速く、比の分解能は
+ * サブセットの物理的な広がりで決まるので落ちない。
+ */
+function* lensRatioSearch(wide, other, options = {}) {
+  const { minRatio = 0.3, maxRatio = 8, steps = 90, coarseSide = 120 } = options;
   const evalAt = (r) => {
     let a, b;
     if (r >= 1) {
@@ -175,7 +207,7 @@ export function estimateLensRatio(wide, other, options = {}) {
     }
     if (Math.min(a.width, a.height, b.width, b.height) < 40) return -1;
     const s = estimateGlobalShift(a, b, downsample,
-      { maxShiftPx: Math.floor(Math.min(a.width, a.height) / 8) });
+      { maxShiftPx: Math.floor(Math.min(a.width, a.height) / 8), coarseSide });
     return s.confidence;
   };
 
@@ -188,6 +220,7 @@ export function estimateLensRatio(wide, other, options = {}) {
     const z = evalAt(r);
     grid.push({ r, z });
     if (z > best.z) best = { r, z };
+    yield { done: i + 1, total: steps + 1 };
   }
   if (best.z < 0.35) return null;
 

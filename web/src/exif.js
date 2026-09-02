@@ -40,8 +40,9 @@ export function parseExif(buffer) {
     const length = view.getUint16(offset + 2);
     if (marker === 0xe1) {
       const start = offset + 4;
-      // "Exif\0\0"
+      // "Exif\0\0"（切り詰められたファイルでは署名の手前で終わっていることがある）
       if (
+        start + 6 <= view.byteLength &&
         view.getUint32(start) === 0x45786966 &&
         view.getUint16(start + 4) === 0x0000
       ) {

@@ -76,6 +76,10 @@ export function runHistoryTests(check, near) {
     const noSigma = compareEpochs({ valueMM: 1.0, pairSigmaMM: null }, { valueMM: 1.3, pairSigmaMM: 0.03 });
     check('σ が無ければ判定しない（差だけ返す）',
       noSigma.significant === null && near(noSigma.deltaMM, 0.3, 1e-9));
+    // σ=0 は「測れていない」。通すと限界 0・比 null のまま「有意」になり表示で落ちる
+    const zeroSigma = compareEpochs({ valueMM: 1.0, pairSigmaMM: 0 }, { valueMM: 1.3, pairSigmaMM: 0 });
+    check('σ が 0 でも判定しない（有意・比 null で落ちない）',
+      zeroSigma.significant === null && zeroSigma.ratio === null);
   }
 
   console.log('\n== 経年変化の傾き ==');

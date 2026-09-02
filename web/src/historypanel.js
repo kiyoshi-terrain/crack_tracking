@@ -350,7 +350,7 @@ function verdictBlock(title, cmp) {
   return `<div class="banner ${kind}"><div>
     <b>${title}: ${fmtSigned(cmp.deltaMM)} mm → ${word}</b><br>
     差の検出限界は <span class="mono">${cmp.limitMM.toFixed(4)} mm</span>
-    （限界の ${cmp.ratio.toFixed(2)} 倍）。
+    （限界の ${cmp.ratio == null ? '—' : cmp.ratio.toFixed(2)} 倍）。
     2時期を比べるので両日のばらつきが乗り、1日ぶんの 3σ より √2 倍ほど広くなります。${temperature}
   </div></div>`;
 }

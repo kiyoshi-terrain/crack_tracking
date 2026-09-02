@@ -117,7 +117,7 @@ function recompute() {
   const cellMM = Math.max(5, parseFloat($('cloudCell').value) || 50);
   const cell = cellMM / cloudState.unit.scale;
 
-  cloudState.map = outOfPlaneMap(points, plane, { cellSize: cell, minPointsPerCell: 3 });
+  cloudState.map = outOfPlaneMap(points, plane, { cellSize: cell, minPointsPerCell: 3, up });
 
   // しきい値は面そのもののばらつきから決める。σ実測と同じ考え方で、
   // 「この点群で何 mm の出っ張りなら本物と言えるか」を点群自身に決めさせる。
@@ -175,7 +175,8 @@ function renderSummary() {
   let warn = '';
   if (scale?.centre && scale.centre.obliquityDeg > 30) {
     const naive = scale.centre.distanceMM / (getIntrinsics()?.focalLengthPx ?? 1);
-    const bias = (scale.centre.mmPerPxX - naive) / naive;
+    // 縦方向に仰いで撮る（高い壁の主用途）と短縮は Y に出る。X だけ見ると 0% と出る
+    const bias = (scale.centre.mmPerPx - naive) / naive;
     warn += banner('warn', '斜めに構えています',
       `斜角 ${scale.centre.obliquityDeg.toFixed(0)}°。距離と焦点距離だけで mm/px を出すと`
       + ` <b>${(bias * 100).toFixed(0)}% 過小</b>に評価します。点群を使えばこの補正は入っています。`);

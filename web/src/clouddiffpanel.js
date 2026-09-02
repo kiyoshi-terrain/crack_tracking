@@ -97,7 +97,7 @@ async function run() {
   try {
     const mode = $('cloudDiffMode')?.value ?? 'plane';
     const result = mode === 'c2c'
-      ? runC2C(cloudA.points, cloudB.points, cellMM)
+      ? runC2C(cloudA.points, cloudB.points, cellMM, up)
       : compareEpochClouds(cloudA.points, cloudB.points, {
         cellSize: cellMM,
         up,
@@ -108,6 +108,15 @@ async function run() {
       lastOutcome = null;
       status(banner('bad', '比較できませんでした',
         '重なるセルがありません。同じ壁面を同じ側からスキャンしているか確認してください。'));
+      return;
+    }
+    // 位置合わせが成立していない（重なりが足りず σ が無限大／ICP の対応が 0）ときに
+    // 「変化なし」と出すのは、未評価と良好を同じ見た目にすることになる
+    if (!Number.isFinite(result.sigmaEmp) || result.registration.inlierCount === 0
+      || (result.registration.mode === 'icp' && !Number.isFinite(result.registration.rms))) {
+      lastOutcome = null;
+      status(banner('bad', '位置合わせできませんでした',
+        '2つの点群の重なりが足りません。同じ壁面を同じ範囲でスキャンしているか確認してください。'));
       return;
     }
     render(result);
@@ -151,7 +160,7 @@ function render(result) {
   }
   if (result.stats.missing > result.stats.evaluated * 0.2) {
     verdict += banner('warn', '欠測が多い',
-      `基準にあって今回に無いセルが ${result.stats.missing} 件あります。`
+      `片方の時期にしか点が無いセルが ${result.stats.missing} 件あります。`
       + 'スキャン範囲のずれか、手前の遮蔽です。判定できていない領域が広いことに注意してください。');
   }
 
@@ -191,13 +200,13 @@ function render(result) {
  *   （サンプリング床）が全部乗る
  * - 限界は平面法と同じ: セル値の実測ばらつき ＋ 床 ＋ 段差ぶん
  */
-function runC2C(pointsA, pointsB, cellMM) {
+function runC2C(pointsA, pointsB, cellMM, up = [0, 0, 1]) {
   const voxel = Math.max(10, cellMM / 3);
   const icp = alignICP(pointsA, decimate(pointsB, 40000), { cell: voxel, maxDist: voxel * 3 });
   const c2c = c2cDistances(pointsA, pointsB, icp.transform, {
     cell: voxel, maxDist: voxel * 4, normal: icp.planeA.normal,
   });
-  const hm = c2cHeatmap(pointsB, c2c, icp.planeA, icp.transform, { cellSize: cellMM });
+  const hm = c2cHeatmap(pointsB, c2c, icp.planeA, icp.transform, { cellSize: cellMM, up });
   const { cols, rows } = hm.grid;
 
   const finite = [];
@@ -249,7 +258,7 @@ function runC2C(pointsA, pointsB, cellMM) {
     registration: { mode: 'icp', rms: icp.rms, iterations: icp.iterations, inlierCount: icp.inlierCount },
     dz, limit, significant,
     sigmaEmp, k, floor: FLOOR_MM,
-    stats: { evaluated, significant: signif, missing: c2c.missing },
+    stats: { evaluated, significant: signif, missing: hm.missingCells },
   };
 }
 

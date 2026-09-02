@@ -368,10 +368,22 @@ export function compareEpochClouds(pointsA, pointsB, options = {}) {
         const nr = r + dy;
         if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
         const nb = nr * cols + nc;
-        for (const map of [mapA, mapB]) {
-          if (Number.isFinite(map.values[idx]) && Number.isFinite(map.values[nb])) {
-            m = Math.max(m, Math.abs(map.values[nb] - map.values[idx]));
-          }
+        if (Number.isFinite(mapA.values[idx]) && Number.isFinite(mapA.values[nb])) {
+          m = Math.max(m, Math.abs(mapA.values[nb] - mapA.values[idx]));
+        }
+        // B は位置合わせのずれ (sx, sy) ぶん動かして読む。差分と同じ場所を見ないと、
+        // ずれが数セルあるとき段差の判定が隣のセルの値で決まる。
+        // 段差の大きさは補間せず生のセル値で取る（双一次で読むと目地と石の間で
+        // 段差がなまり、限界が足りずに目地のセルが有意になる）
+        const bc = Math.round(c + registration.sx);
+        const br = Math.round(r + registration.sy);
+        const bnc = bc + dx;
+        const bnr = br + dy;
+        if (bc >= 0 && bc < cols && br >= 0 && br < rows
+          && bnc >= 0 && bnc < cols && bnr >= 0 && bnr < rows) {
+          const bv = mapB.values[br * cols + bc];
+          const bw = mapB.values[bnr * cols + bnc];
+          if (Number.isFinite(bv) && Number.isFinite(bw)) m = Math.max(m, Math.abs(bw - bv));
         }
       }
       edgeRange[idx] = m;
