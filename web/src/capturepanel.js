@@ -38,6 +38,7 @@ const LENS_KEY = 'live-lens';
 const FACTORS_KEY = 'lens-factors';   // deviceId → 広角比の倍率（実測値）
 let lensFactors = {};
 try { lensFactors = JSON.parse(localStorage.getItem(FACTORS_KEY)) || {}; } catch { /* 記憶なし */ }
+let calibrating = null;   // 倍率を実測中のレンズの deviceId（UI が「実測中」と出すため）
 let session = null;    // { frames: [{imageData, small, focus}], sigmas, limits, rejects, timer }
 let finishing = false; // セッション終了後、本解析へ渡し終わるまで true（二重起動を防ぐ）
 let starting = null;   // startLive の進行中 Promise（二重起動でストリームが漏れないように）
@@ -142,7 +143,7 @@ export function lensState() {
   const kind = active?.kind ?? 'wide';
   // 倍率: 広角は 1。それ以外は実測値があればそれ（無ければ null → UI が入力を促す）
   const factor = kind === 'wide' ? 1 : (lensFactors[activeDeviceId] ?? null);
-  return { lenses, activeDeviceId, activeKind: kind, zoom, factor };
+  return { lenses, activeDeviceId, activeKind: kind, zoom, factor, calibrating: calibrating === activeDeviceId };
 }
 
 /** レンズを切り替える（計測中は不可）。 */
@@ -176,6 +177,17 @@ export async function switchLens(deviceId) {
  * 広角の画と新レンズの画を比べる。機種名は Web から読めないので、測る。
  */
 async function calibrateLensFactor(deviceId, wideFrame, wideZoom = 1) {
+  calibrating = deviceId;
+  deps.onStateChange?.();
+  try {
+    await measureLensFactor(deviceId, wideFrame, wideZoom);
+  } finally {
+    calibrating = null;
+    deps.onStateChange?.();
+  }
+}
+
+async function measureLensFactor(deviceId, wideFrame, wideZoom) {
   setLiveStatus('レンズの倍率を実測中… そのまま向けていてください', 'info');
   // 新しいストリームの最初のフレームが来るまで待つ（iOS は 1 秒以上かかることがある）。
   // 待たずに掴むと空フレームで黙って諦め、倍率が永遠に付かない

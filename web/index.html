@@ -178,18 +178,40 @@
   /* レンズ切替のピル。カメラアプリの 0.5 / 1× / 5× に相当 */
   #lensBar {
     position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    max-width: calc(100% - 24px);
+  }
+  /* 使用中のレンズと倍率を文で出す。ピルの点灯だけでは読めない */
+  .lens-caption {
+    font-size: 11.5px; color: var(--ink-soft); text-align: center; line-height: 1.35;
+    max-width: 100%; padding: 4px 12px; border-radius: 14px;
+    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.1);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    font-variant-numeric: tabular-nums;
+  }
+  .lens-caption b { color: #fff; font-weight: 700; }
+  .lens-caption[data-kind="warn"] { color: var(--amber); border-color: rgba(217,154,43,.5); }
+  .lens-caption[data-kind="warn"] b { color: var(--amber); }
+  .lens-pills {
     display: flex; gap: 6px; padding: 4px; border-radius: 999px;
     background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.1);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   }
   #lensBar .lens {
     -webkit-appearance: none; appearance: none; border: 0; border-radius: 999px;
-    background: none; color: var(--ink-soft); font: inherit; font-size: 12px; font-weight: 600;
-    padding: 5px 11px; cursor: pointer; line-height: 1.2; white-space: nowrap;
+    background: none; color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 700;
+    padding: 4px 12px; cursor: pointer; line-height: 1.15; white-space: nowrap;
+    font-variant-numeric: tabular-nums; text-align: center;
   }
-  #lensBar .lens.on { background: rgba(255,255,255,.14); color: #fff; }
+  /* 使用中はアンバーで塗る。薄い白では「どれが点いているか」が読めない（実機で指摘） */
+  #lensBar .lens.on { background: var(--amber); color: #111; }
   #lensBar .lens small { display: block; font-size: 8.5px; font-weight: 500; color: var(--ink-dim); letter-spacing: .04em; }
-  #lensBar .lens.on small { color: var(--amber); }
+  #lensBar .lens.on small { color: #111; opacity: .8; }
+  /* 未実測は「良好」と同じ見た目にしない */
+  #lensBar .lens.unknown { color: var(--amber); }
+  #lensBar .lens.unknown small { color: var(--amber); opacity: .8; }
+  #lensBar .lens.unknown.on { background: rgba(217,154,43,.25); color: var(--amber); }
+  #lensBar .lens.unknown.on small { color: var(--amber); }
   body.session-on #lensBar { opacity: .35; pointer-events: none; }
   body:not(.live-on) #lensBar { display: none; }
 
