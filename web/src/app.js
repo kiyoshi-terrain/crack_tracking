@@ -297,54 +297,72 @@ function renderLensBar() {
   const ls = lensState();
   const names = { ultra: '超広角', wide: '広角', tele: '望遠' };
   const fmt = (f) => (f < 1 ? f.toFixed(1) : (Math.round(f * 10) / 10).toString().replace(/\.0$/, '')) + '×';
-  const seen = {};
-  const zoomOn = ls.zoom && ls.activeKind === 'wide' && Math.abs((ls.zoom.value || 1) - 2) < 0.05;
-  // ピルはレンズ名＋倍率の2段。「0.5×」だけでは何のレンズか分からず、
-  // 「望遠」だけでは何倍か分からない。両方を必ず出す
-  const items = ls.lenses.map((l) => {
-    seen[l.kind] = (seen[l.kind] ?? 0) + 1;
-    const active = l.deviceId === ls.activeDeviceId && !zoomOn;
-    // 広角は 1×。それ以外の倍率は端末からは取れないので、スケールシートの入力値を出す
-    const factor = factorOf(l.kind);
-    let name = names[l.kind];
-    if (seen[l.kind] > 1) name += ` ${seen[l.kind]}`;
-    const value = factor != null ? fmt(factor) : '焦点距離 未入力';
-    return `<button class="lens${active ? ' on' : ''}${factor == null ? ' unknown' : ''}" data-lens="${l.deviceId}">`
-      + `<small>${name}</small>${value}</button>`;
-  });
-  // デジタル 2× は広角のときだけ（48MP 機のセンサークロップに限り実質的に効く）。
-  // 望遠のときにズームのピルを出すと「1×」が点いたままになり、倍率を誤読させる
-  if (ls.zoom && ls.activeKind === 'wide' && 2 <= ls.zoom.max) {
-    const wideIdx = items.findIndex((_, i) => ls.lenses[i].kind === 'wide');
-    const pill = `<button class="lens zoom${zoomOn ? ' on' : ''}" data-zoom="${zoomOn ? 1 : 2}"><small>デジタル</small>2×</button>`;
-    items.splice(wideIdx + 1, 0, pill);
-  }
-  if (items.length <= 1) { bar.innerHTML = ''; bar.classList.add('hidden'); return; }
 
-  // 「いま何で撮っているか」を文で出す。ピルの点灯だけでは読めない
-  const activeName = names[ls.activeKind];
-  const zoom = ls.zoom?.value || 1;
-  let caption;
-  let captionKind = 'ok';
-  const m = lensMultiplierNow();
-  if (!(m.focal > 0)) {
-    caption = `使用中 <b>${activeName}</b> 焦点距離が未入力`
-      + `<br>スケールで「35mm換算焦点距離 — ${activeName}」を入れると mm で出ます`;
-    captionKind = 'warn';
-  } else {
-    const eff = m.focal * zoom;
-    caption = `使用中 <b>${activeName}`
-      + (m.factor != null ? ` ${fmt(m.factor * zoom)}` : '')
-      + `</b> <span class="mono">${eff.toFixed(0)}mm</span>`
-      + (zoom > 1.05 ? '（センサークロップ 2×）' : '');
+  // ピルは**ネイティブのカメラと同じズーム段**にする（0.5× / 1× / 2× / 5×）。
+  // レンズ本数とボタン数は一致しない: 2× は広角センサーの切り出しなので、
+  // 物理レンズ3本に対してボタンは4つになる。
+  //
+  // ラベルの倍率と、mm 換算に使う焦点距離は別物として扱う。
+  // ラベルは「どれを使っているか」を示すだけなので、焦点距離が未入力でも
+  // 公称値（超広角 0.5×）で名乗ってよい。計算は focalOf() しか見ない。
+  const NOMINAL = { ultra: 0.5, wide: 1, tele: null };
+  const label = (kind, zoom) => {
+    const measured = factorOf(kind);
+    const v = measured != null ? measured * zoom
+      : (NOMINAL[kind] != null ? NOMINAL[kind] * zoom : null);
+    return v != null ? fmt(v) : names[kind];
+  };
+
+  const wide = ls.lenses.find((l) => l.kind === 'wide');
+  const steps = [];
+  for (const l of ls.lenses.filter((x) => x.kind === 'ultra')) {
+    steps.push({ device: l.deviceId, kind: 'ultra', zoom: 1 });
   }
-  bar.innerHTML = `<div class="lens-caption" data-kind="${captionKind}">${caption}</div>`
+  if (wide) steps.push({ device: wide.deviceId, kind: 'wide', zoom: 1 });
+  // センサークロップの 2×。48MP 機では分解能が実質的に上がるので出す
+  if (wide && ls.zoom && ls.zoom.max >= 2) {
+    steps.push({ device: wide.deviceId, kind: 'wide', zoom: 2 });
+  }
+  for (const l of ls.lenses.filter((x) => x.kind === 'tele')) {
+    steps.push({ device: l.deviceId, kind: 'tele', zoom: 1 });
+  }
+  if (steps.length <= 1) { bar.innerHTML = ''; bar.classList.add('hidden'); return; }
+
+  const nowZoom = ls.zoom?.value || 1;
+  const items = steps.map((st, i) => {
+    const on = st.device === ls.activeDeviceId && Math.abs(nowZoom - st.zoom) < 0.15;
+    const text = label(st.kind, st.zoom);
+    // 倍率が出せないレンズは名前だけ。「望遠 望遠」と重ねない
+    const body = text === names[st.kind] ? text : `<small>${names[st.kind]}</small>${text}`;
+    return `<button class="lens${on ? ' on' : ''}" data-step="${i}"`
+      + ` data-device="${st.device}" data-zoom="${st.zoom}">${body}</button>`;
+  });
+
+  // 「いま何で撮っているか」は一行。焦点距離が無いことは、ここでは責めない
+  // （mm が要るのは σ を出すときで、それは HUD の分解能とヒントが受け持つ）
+  const m = lensMultiplierNow();
+  const activeLabel = label(ls.activeKind, nowZoom);
+  const caption = `使用中 <b>${names[ls.activeKind]}`
+    + (activeLabel === names[ls.activeKind] ? '' : ` ${activeLabel}`) + '</b>'
+    + (m.focal > 0
+      ? ` <span class="mono">${(m.focal * nowZoom).toFixed(0)}mm</span>`
+      : ' <button class="lens-fix" data-open-scale>mm 未設定</button>');
+
+  bar.innerHTML = `<div class="lens-caption">${caption}</div>`
     + `<div class="lens-pills">${items.join('')}</div>`;
   bar.classList.remove('hidden');
-  bar.querySelectorAll('[data-lens]').forEach((b) => b.addEventListener('click', async () => {
-    try { await switchLens(b.dataset.lens); } catch (e) { setViewfinderHint(`レンズを切り替えられません: ${e.message}`, 'warn'); }
+
+  bar.querySelectorAll('[data-step]').forEach((b) => b.addEventListener('click', async () => {
+    const dev = b.dataset.device;
+    const z = Number(b.dataset.zoom) || 1;
+    try {
+      if (dev !== lensState().activeDeviceId) await switchLens(dev);
+      setZoom(z);
+    } catch (e) {
+      setViewfinderHint(`レンズを切り替えられません: ${e.message}`, 'warn');
+    }
   }));
-  bar.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => setZoom(Number(b.dataset.zoom))));
+  bar.querySelector('[data-open-scale]')?.addEventListener('click', () => openSheet('scale'));
 }
 
 function setNote(id, text) {
@@ -649,6 +667,37 @@ for (const id of ['distance', 'focal35', 'referenceLength', 'focalTele', 'focalU
 }
 
 // 仕様値をまとめて入れる。推測しないための入り口で、値の出どころは Apple の公表値
+// 焦点距離を EXIF から取り込む。仕様値は写真に書いてあるので、打ち込ませない。
+// どのレンズで撮るかは人が選ぶ（ネイティブのカメラで倍率を切り替えてもらう）。
+// 値からレンズ種別を推測すると、2× の切り出し（48mm）を望遠と取り違える
+let grabTarget = null;
+for (const btn of document.querySelectorAll('[data-grab]')) {
+  btn.addEventListener('click', () => {
+    grabTarget = { id: btn.dataset.grab, name: btn.dataset.grabName };
+    $('focalGrabNote').textContent = `${grabTarget.name} に切り替えて1枚撮ってください。`;
+    $('focalInput').click();
+  });
+}
+$('focalInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file || !grabTarget) return;
+  try {
+    const exif = parseExif(await file.arrayBuffer());
+    const f = exif?.focalLength35mm;
+    if (!(f > 0)) {
+      $('focalGrabNote').textContent = 'この写真には 35mm 換算焦点距離が入っていませんでした。手で入れてください。';
+      return;
+    }
+    $(grabTarget.id).value = f;
+    $(grabTarget.id).dispatchEvent(new Event('input', { bubbles: true }));
+    $('focalGrabNote').textContent = `${grabTarget.name} に ${f}mm を取り込みました。`;
+    updateGSD();
+  } catch (err) {
+    $('focalGrabNote').textContent = `読み取れませんでした: ${err.message}`;
+  }
+});
+
 $('presetIphone16Pro').addEventListener('click', () => {
   const preset = { focal35: '24', focalTele: '120', focalUltra: '13' };
   for (const [id, v] of Object.entries(preset)) {

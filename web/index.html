@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v22">
+<html lang="ja" data-version="v23">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -210,6 +210,15 @@
   #lensBar .lens small { display: block; font-size: 8.5px; font-weight: 500; color: var(--ink-dim); letter-spacing: .04em; }
   #lensBar .lens.on small { color: #111; opacity: .8; }
   /* 未実測は「良好」と同じ見た目にしない */
+  button.grab {
+    margin-top: 6px; width: 100%; padding: 9px; font-size: 12.5px;
+    background: #222833; border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
+  }
+  .lens-fix {
+    -webkit-appearance: none; appearance: none; border: 1px solid rgba(217,154,43,.5);
+    background: rgba(217,154,43,.14); color: var(--amber); border-radius: 999px;
+    font: inherit; font-size: 11px; padding: 2px 9px; margin-left: 4px; cursor: pointer;
+  }
   #lensBar .lens.unknown { color: var(--amber); }
   #lensBar .lens.unknown small { color: var(--amber); opacity: .8; }
   #lensBar .lens.unknown.on { background: rgba(217,154,43,.25); color: var(--amber); }
@@ -621,19 +630,26 @@
           <input type="number" id="distance" step="0.01" min="0.05" inputmode="decimal" placeholder="レーザー距離計の実測値">
         </div>
         <div>
-          <label>35mm換算焦点距離（mm）— 広角</label>
-          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="写真は EXIF から自動（iPhone 主カメラ 24）">
+          <label>35mm換算焦点距離（mm）— 広角 1×</label>
+          <input type="number" id="focal35" step="0.1" inputmode="decimal" placeholder="iPhone 16 Pro なら 24">
+          <button class="grab" data-grab="focal35" data-grab-name="広角 1×">1× で撮って取り込む</button>
         </div>
         <div>
           <label>35mm換算焦点距離（mm）— 望遠</label>
           <input type="number" id="focalTele" step="0.1" inputmode="decimal" placeholder="iPhone 16 Pro の 5× なら 120">
+          <button class="grab" data-grab="focalTele" data-grab-name="望遠">5× で撮って取り込む</button>
         </div>
         <div>
           <label>35mm換算焦点距離（mm）— 超広角</label>
           <input type="number" id="focalUltra" step="0.1" inputmode="decimal" placeholder="iPhone 16 Pro なら 13">
+          <button class="grab" data-grab="focalUltra" data-grab-name="超広角">0.5× で撮って取り込む</button>
         </div>
+        <input type="file" id="focalInput" accept="image/*" capture="environment" class="hidden">
+        <div id="focalGrabNote" class="note"></div>
         <div class="banner"><div>
-          <b>数字はメーカーの仕様から取ってください。</b>推測も実測もしません。
+          <b>「撮って取り込む」が確実です。</b>カメラが開くので、その倍率に切り替えて1枚撮ってください。
+          写真の EXIF にメーカーの値が書いてあるので、そこから読み取ります。打ち込む必要はありません。<br>
+          手で入れる場合も推測はしません。
           Apple は 35mm 換算で公表しています（16 Pro: 超広角 13 / 広角 24 / 望遠 120mm）。
           「2×」は広角センサーの切り出しなので、広角の値の 2 倍（48mm）として扱います。
           <button id="presetIphone16Pro" style="margin-top:8px">iPhone 16 Pro の値を入れる</button>
