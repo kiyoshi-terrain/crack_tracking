@@ -13,6 +13,11 @@
 /**
  * @param {{width:number, height:number, data:Float32Array}} image 0...1 の輝度
  */
+/** sRGB 0.02 → 線形光（0.04045 未満は c/12.92） */
+export const SATURATED_DARK_LINEAR = 0.02 / 12.92;
+/** sRGB 0.98 → 線形光 ((c+0.055)/1.055)^2.4 */
+export const SATURATED_BRIGHT_LINEAR = ((0.98 + 0.055) / 1.055) ** 2.4;
+
 export function speckleQuality(image, { subsetHalf = 15, sampleStep = 8 } = {}) {
   const { width: w, height: h, data } = image;
   if (w < 8 || h < 8) {
@@ -53,9 +58,15 @@ export function speckleQuality(image, { subsetHalf = 15, sampleStep = 8 } = {}) 
   localSigmas.sort((a, b) => a - b);
   const contrast = localSigmas.length ? localSigmas[localSigmas.length >> 1] : 0;
 
+  // 飽和（白飛び・黒つぶれ）は符号化の現象なので sRGB の符号値で定義する。
+  // ここへ来る画像は toGray で線形光に戻してあるため、sRGB 0.02 / 0.98 を
+  // 線形光へ換算したしきい値を使う。線形光の 0.02 は sRGB の 39/255 で、
+  // 黒つぶれではなくただの暗いグレー。実写（風化した大谷石・正しい露出）で
+  // 12.6% が「黒つぶれ」と数えられ、模様が濃いのに fair と誤判定していた
+  // （sRGB のまま数えると 1.96%）。
   let saturated = 0;
   for (let i = 0; i < data.length; i++) {
-    if (data[i] >= 0.98 || data[i] <= 0.02) saturated++;
+    if (data[i] >= SATURATED_BRIGHT_LINEAR || data[i] <= SATURATED_DARK_LINEAR) saturated++;
   }
   const saturatedRatio = saturated / data.length;
 

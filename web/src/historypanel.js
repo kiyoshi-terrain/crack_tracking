@@ -165,6 +165,7 @@ function recordObservation() {
     return;
   }
   let valueMM;
+  let methodLabel = m?.method ?? '手入力';
   if (source === 'manual') {
     valueMM = parseFloat($('obsValue').value);
     if (!Number.isFinite(valueMM)) {
@@ -178,6 +179,7 @@ function recordObservation() {
       return;
     }
     valueMM = pair.meanMM;
+    if (pair.method) methodLabel = pair.method;
   }
 
   // σ は解析から自動で入るが、ノギスなど別手段で測った場合は手で入れられる。
@@ -191,7 +193,7 @@ function recordObservation() {
       pairSigmaMM: sigmaMM,
       temperatureC: parseFloat($('obsTemp').value),
       weather: $('obsWeather').value,
-      method: m?.method ?? '手入力',
+      method: methodLabel,
       frames: m?.frames ?? null,
       bulgeMM: m?.bulgeMM ?? null,
       note: $('obsNote').value,
@@ -270,19 +272,35 @@ function renderRecordForm() {
   const select = $('obsValueSource');
   const previous = select.value;
 
+  // ターゲット対は「2点の距離」、亀裂測点は「基準からの開口の変化」。
+  // 同じ測点に混ぜると差が意味を失うので、見た目で区別する
   const options = [
-    ...(m?.pairs ?? []).map((p) =>
-      `<option value="${escapeHtml(p.label)}">ターゲット対 ${escapeHtml(p.label)}`
-      + `（${p.meanMM.toFixed(3)} mm）</option>`),
+    ...(m?.pairs ?? []).filter((p) => Number.isFinite(p.meanMM)).map((p) => (p.kind === 'crack'
+      ? `<option value="${escapeHtml(p.label)}">亀裂 ${escapeHtml(p.label)} の開口`
+        + `（${p.meanMM >= 0 ? '+' : ''}${p.meanMM.toFixed(3)} mm）</option>`
+      : `<option value="${escapeHtml(p.label)}">ターゲット対 ${escapeHtml(p.label)}`
+        + `（${p.meanMM.toFixed(3)} mm）</option>`)),
     '<option value="manual">手入力</option>',
   ];
   select.innerHTML = options.join('');
-  if (previous && [...select.options].some((o) => o.value === previous)) select.value = previous;
+  // 前回の選択を保つ。ただし「手入力」は解析結果が無かったときの既定なので、
+  // 対が出てきたら先頭の対（解析で出た量）へ切り替える。手入力に戻したいときは選び直せる
+  const hasPairs = options.length > 1;
+  if (previous && previous !== 'manual' && [...select.options].some((o) => o.value === previous)) {
+    select.value = previous;
+  } else if (!hasPairs) {
+    select.value = 'manual';
+  }
 
   $('obsValueRow').style.display = select.value === 'manual' ? '' : 'none';
 
-  // σ は自動で入れるが、一度手で書き換えられていたら尊重する
-  if (m && !$('obsSigma').dataset.touched) $('obsSigma').value = m.pairSigmaMM.toFixed(4);
+  // σ は自動で入れるが、一度手で書き換えられていたら尊重する。
+  // 亀裂測点は対ごとに σ が違う（パッチの点数と散らばりで決まる）ので、選んだ対の値を優先
+  if (m && !$('obsSigma').dataset.touched) {
+    const chosen = (m.pairs ?? []).find((p) => p.label === select.value);
+    const sigma = Number.isFinite(chosen?.sigmaMM) ? chosen.sigmaMM : m.pairSigmaMM;
+    if (Number.isFinite(sigma)) $('obsSigma').value = sigma.toFixed(4);
+  }
 
   $('obsStatus').innerHTML = m
     ? `<p class="note">直近の解析: ${m.method} 方式・${m.frames} 枚・`

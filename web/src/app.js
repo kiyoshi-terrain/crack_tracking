@@ -24,6 +24,7 @@ import {
   startSession, stopSessionEarly, stopLive, lensState, switchLens, setZoom, requestZoom, currentZoomValue,
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
+import { crackOpeningSeries, crackPatches, crackFrame, lineToLocal } from './crackline.js';
 import { APP_VERSION } from './version.js';
 
 const $ = (id) => document.getElementById(id);
@@ -38,6 +39,11 @@ const state = {
   roi: null,
   preview: null,
   lastResult: null,
+  // 亀裂測点。基準画像（1枚目）の画素座標で持つ線分 {label, x1, y1, x2, y2}。
+  // 基準として保存すると meta に入り、次回の比較で同じ線が使われる
+  cracks: [],
+  crackPairs: [],  // σ 実測で出た亀裂ごとの開口の系列（ターゲット対と同じ扱い）
+  drawMode: 'roi', // ビューファインダーのドラッグが何を引くか: 'roi' | 'crack'
 };
 
 // ═══════════════════════════════════════════ 読み込み
@@ -723,6 +729,13 @@ initComparePanel({
   getGsd: () => currentGSD(),
   getRoi: () => state.roi,
   getLens: () => lensForCurrentPhotos(),
+  // 2時期比較で出た亀裂の開口を、σ 実測の結果と同じ棚に置く。
+  // 経時管理はここから拾うだけで、比較の中身には関与しない
+  onMeasurement: (m) => {
+    state.measurement = { ...m, at: exifDateISO(m.atExif) ?? new Date().toISOString() };
+    refreshHistoryPanel();
+    updateSteps();
+  },
   // 視差補正の材料。基準画像は今回の写真と画素数が違うことがあるので、
   // 内部パラメータはそのつど基準画像の寸法で組み直す
   getSurface: (width, height) => {
@@ -885,6 +898,10 @@ $('baselineSaveBtn').addEventListener('click', async () => {
       focal35: parseFloat($('focal35').value) || null,
       distanceM: parseFloat($('distance').value) || null,
       capturedAt: new Date().toISOString(),
+      // 亀裂測点の線（基準画像の画素座標）。次回の比較で同じ線が自動で使われる
+      cracks: state.cracks.map((c) => ({ ...c })),
+      roi: state.roi ? { ...state.roi } : null,
+      subsetHalf: clampInt($('subsetHalf').value, 5, 60, 15),
     });
     $('baselineSaveBtn').textContent = '保存しました';
     setTimeout(() => { $('baselineSaveBtn').textContent = '保存'; }, 1800);
@@ -1033,7 +1050,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // 画面の向きが変わるとビューファインダーの実寸が変わる。ROI の枠を置き直す
-window.addEventListener('shell:resize', () => { if (state.roi) setRoi(state.roi); });
+window.addEventListener('shell:resize', () => { if (state.roi) setRoi(state.roi); renderCrackLayer(); });
 
 // ═══════════════════════════════════════════ 解析範囲
 
@@ -1045,6 +1062,12 @@ function setupPreview() {
   container.querySelectorAll('canvas').forEach((c) => c.remove());
   container.insertBefore(preview.canvas, $('roiBox'));
 
+  // 線は前の写真の座標なので、写真が替わったら捨てる
+  state.cracks = [];
+  state.crackPairs = [];
+  renderCrackLayer();
+  renderCrackList();
+
   const side = Math.round(Math.min(imageData.width, imageData.height) * 0.6);
   setRoi({
     x: Math.round((imageData.width - side) / 2),
@@ -1053,16 +1076,26 @@ function setupPreview() {
   });
 
   let dragStart = null;
+  let dragCur = null;
   preview.canvas.addEventListener('pointerdown', (e) => {
     const rect = preview.canvas.getBoundingClientRect();
     dragStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    dragCur = dragStart;
     preview.canvas.setPointerCapture(e.pointerId);
   });
   preview.canvas.addEventListener('pointermove', (e) => {
     if (!dragStart) return;
     const rect = preview.canvas.getBoundingClientRect();
     const cur = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    dragCur = cur;
     const toImage = (preview.canvas.width / rect.width) / preview.scale;
+    if (state.drawMode === 'crack') {
+      renderCrackLayer({
+        x1: dragStart.x * toImage, y1: dragStart.y * toImage,
+        x2: cur.x * toImage, y2: cur.y * toImage,
+      });
+      return;
+    }
     setRoi({
       x: Math.min(dragStart.x, cur.x) * toImage,
       y: Math.min(dragStart.y, cur.y) * toImage,
@@ -1070,7 +1103,25 @@ function setupPreview() {
       height: Math.abs(cur.y - dragStart.y) * toImage,
     });
   });
-  preview.canvas.addEventListener('pointerup', () => { dragStart = null; updateSteps(); });
+  preview.canvas.addEventListener('pointerup', () => {
+    if (dragStart && dragCur && state.drawMode === 'crack') {
+      const rect = preview.canvas.getBoundingClientRect();
+      const toImage = (preview.canvas.width / rect.width) / preview.scale;
+      const line = {
+        x1: dragStart.x * toImage, y1: dragStart.y * toImage,
+        x2: dragCur.x * toImage, y2: dragCur.y * toImage,
+      };
+      // 短すぎる線はタップの誤りとみなす
+      if (Math.hypot(line.x2 - line.x1, line.y2 - line.y1) >= 40) {
+        addCrack(line);
+      } else {
+        renderCrackLayer();
+      }
+    }
+    dragStart = null;
+    dragCur = null;
+    updateSteps();
+  });
 }
 
 $('roiCenter').addEventListener('click', () => {
@@ -1109,6 +1160,149 @@ function setRoi(roi) {
   box.style.width = `${clamped.width * displayScale}px`;
   box.style.height = `${clamped.height * displayScale}px`;
 }
+
+// ═══════════════════════════════════════════ 亀裂測点
+
+/** パッチの寸法。線をまたぐサブセットは使わないので、margin はサブセット半径より広く */
+function crackPatchOptions() {
+  const subsetHalf = clampInt($('subsetHalf').value, 5, 60, 15);
+  const step = clampInt($('step').value, 8, 200, 25);
+  return { margin: subsetHalf + 5, depth: step * 4 };
+}
+
+function nextCrackLabel() {
+  const used = new Set(state.cracks.map((c) => c.label));
+  for (const ch of 'ABCDEFGHJKLMNPQRSTUVWXYZ') if (!used.has(ch)) return ch;
+  return `L${state.cracks.length + 1}`;
+}
+
+function addCrack(line) {
+  if (!state.files.length) return;
+  const { imageData } = state.files[0];
+  const clamp = (v, hi) => Math.max(0, Math.min(hi, Math.round(v)));
+  state.cracks.push({
+    label: nextCrackLabel(),
+    x1: clamp(line.x1, imageData.width - 1), y1: clamp(line.y1, imageData.height - 1),
+    x2: clamp(line.x2, imageData.width - 1), y2: clamp(line.y2, imageData.height - 1),
+  });
+  state.crackPairs = [];
+  renderCrackLayer();
+  renderCrackList();
+  const f = crackFrame(state.cracks[state.cracks.length - 1]);
+  setViewfinderHint(`亀裂 ${state.cracks[state.cracks.length - 1].label}（${f?.orientation ?? ''}）を引きました。`
+    + '続けて引けます。終わったら方式シートの「亀裂を引く」をもう一度押してください', 'info');
+}
+
+function setCrackDrawMode(on) {
+  state.drawMode = on ? 'crack' : 'roi';
+  const btn = $('crackDrawToggle');
+  if (btn) {
+    btn.dataset.on = on ? '1' : '0';
+    btn.textContent = on ? '亀裂を引く（終了）' : '亀裂を引く';
+  }
+  document.body.classList.toggle('crack-draw', on);
+  if (on) {
+    setViewfinderHint('亀裂に沿ってドラッグして線を引いてください（解析範囲の中に）', 'info');
+  } else {
+    setViewfinderHint('ドラッグで解析範囲を選べます', 'info');
+  }
+}
+
+/** ビューファインダー上の線とパッチ。draft は引いている途中の線 */
+function renderCrackLayer(draft = null) {
+  const layer = $('crackLayer');
+  if (!layer) return;
+  if (!state.preview || !state.files.length) { layer.innerHTML = ''; return; }
+  const rect = state.preview.canvas.getBoundingClientRect();
+  if (!(rect.width > 0)) { layer.innerHTML = ''; return; }
+  // 画像座標 → 表示座標
+  const k = (rect.width / state.preview.canvas.width) * state.preview.scale;
+  layer.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+  const opts = crackPatchOptions();
+  const px = (v) => (v * k).toFixed(1);
+  const parts = [];
+  for (const c of state.cracks) {
+    const p = crackPatches(c, opts);
+    if (!p) continue;
+    const poly = (pts) => pts.map(([x, y]) => `${px(x)},${px(y)}`).join(' ');
+    parts.push(`<polygon class="ck-patch" points="${poly(p.side1)}"/>`);
+    parts.push(`<polygon class="ck-patch" points="${poly(p.side2)}"/>`);
+    parts.push(`<line class="ck-line" x1="${px(c.x1)}" y1="${px(c.y1)}" x2="${px(c.x2)}" y2="${px(c.y2)}"/>`);
+    parts.push(`<text class="ck-label" x="${(Number(px(c.x1)) + 6).toFixed(1)}" y="${(Number(px(c.y1)) - 6).toFixed(1)}">${escapeHtml(c.label)}</text>`);
+  }
+  if (draft) {
+    parts.push(`<line class="ck-draft" x1="${px(draft.x1)}" y1="${px(draft.y1)}" x2="${px(draft.x2)}" y2="${px(draft.y2)}"/>`);
+  }
+  layer.innerHTML = parts.join('');
+}
+
+/** 方式シートの一覧 */
+function renderCrackList() {
+  const el = $('crackList');
+  if (!el) return;
+  if (!state.cracks.length) {
+    el.innerHTML = '<p class="note" style="margin:4px 0 0">線はまだありません。</p>';
+    return;
+  }
+  el.innerHTML = state.cracks.map((c, i) => {
+    const f = crackFrame(c);
+    return `<div class="ck-row"><span class="ck-sw"></span>`
+      + `<span>亀裂 <b>${escapeHtml(c.label)}</b> — ${f?.orientation ?? ''}・長さ ${Math.round(f?.length ?? 0)} px</span>`
+      + `<button data-crack-delete="${i}">削除</button></div>`;
+  }).join('');
+}
+
+/** 結果シートの表。同日の連写なので平均は 0 付近が正常。σ が「この亀裂をどこまで読めるか」 */
+function renderCrackResults(gsd) {
+  const el = $('crackResults');
+  if (!el) return;
+  if (!state.cracks.length) { el.innerHTML = ''; return; }
+  const fmt = (px) => (gsd ? `${(px * gsd).toFixed(4)} mm` : `${px.toFixed(4)} px`);
+  const rows = state.crackPairs.map((p) => {
+    const c = state.cracks.find((x) => x.label === p.label);
+    const f = c ? crackFrame(c) : null;
+    if (p.ok === false) {
+      return `<tr><td>${escapeHtml(p.label)}</td><td>${f?.orientation ?? ''}</td>`
+        + `<td colspan="4" class="note" style="padding:6px 8px">${escapeHtml(p.reason ?? '算出できませんでした')}</td></tr>`;
+    }
+    return `<tr><td>${escapeHtml(p.label)}</td><td>${f?.orientation ?? ''}</td>`
+      + `<td class="num">${fmt(p.meanPx)}</td><td class="num">${fmt(p.sigmaPx)}</td>`
+      + `<td class="num">${fmt(p.shearPx)}</td><td class="num">${p.frames}<br><span class="note">${p.n1} / ${p.n2} 点</span></td></tr>`;
+  });
+  el.innerHTML = `
+    <h3 class="sec">亀裂測点（線の両側の相対変位）</h3>
+    <div class="scroll-x"><table>
+      <tr><th>亀裂</th><th>向き</th><th class="num">開口の平均</th><th class="num">σ（1枚あたり）</th><th class="num">ずれの平均</th><th class="num">枚 / 点数</th></tr>
+      ${rows.join('')}
+    </table></div>
+    <p class="note">同日の連写なので平均は 0 付近が正常です。<b>σ が「この構図でこの亀裂の開口をどこまで読めるか」</b>。
+      経時管理にはこの σ が付いて記録され、次回の 2 時期比較で「基準からの開口の変化」が出ます。
+      開口は線に直交する成分（正＝開いた）、ずれは線に沿う成分（縦線なら正＝右側が下がった）。</p>`;
+}
+
+$('crackDrawToggle')?.addEventListener('click', () => {
+  if (!state.files.length) { setViewfinderHint('先に写真を読み込んでください', 'warn'); return; }
+  const on = state.drawMode !== 'crack';
+  setCrackDrawMode(on);
+  if (on) closeSheet();
+});
+$('crackClear')?.addEventListener('click', () => {
+  state.cracks = [];
+  state.crackPairs = [];
+  renderCrackLayer();
+  renderCrackList();
+  renderCrackResults(currentGSD());
+});
+$('crackList')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-crack-delete]');
+  if (!btn) return;
+  state.cracks.splice(Number(btn.dataset.crackDelete), 1);
+  state.crackPairs = [];
+  renderCrackLayer();
+  renderCrackList();
+  renderCrackResults(currentGSD());
+});
+renderCrackList();
 
 // ═══════════════════════════════════════════ 解析
 
@@ -1215,6 +1409,8 @@ async function analyze() {
 
   let dicStats = null;
   let lastField = null;
+  const frameResiduals = [];
+  state.crackPairs = [];
 
   if (method !== 'targets') {
     const quality = speckleQuality(reference, { subsetHalf });
@@ -1248,6 +1444,22 @@ async function analyze() {
         perFrame.push({ index: i, points: field.points.length, rejected: field.rejected, sigma: stats.sigma, shift });
         allResiduals.push(...res);
         lastField = { residuals: res, roi };
+        frameResiduals.push(res);
+      }
+
+      // 亀裂測点: 残差は解析範囲内の座標なので線も同じ座標系へ移す
+      if (state.cracks.length && frameResiduals.length >= 2) {
+        const opts = crackPatchOptions();
+        state.crackPairs = state.cracks.map((c) => {
+          const r = crackOpeningSeries(frameResiduals, lineToLocal(c, roi), opts);
+          if (!r.ok) return { label: c.label, kind: 'crack', ok: false, reason: r.reason };
+          return {
+            label: c.label, kind: 'crack', method: '亀裂測点（連写 DIC）',
+            meanPx: r.openingPx, sigmaPx: r.sigmaOpeningPx,
+            shearPx: r.shearPx, sigmaShearPx: r.sigmaShearPx,
+            frames: r.frames, n1: r.perFrame[0].n1, n2: r.perFrame[0].n2,
+          };
+        });
       }
 
       if (allResiduals.length) {
@@ -1264,6 +1476,7 @@ async function analyze() {
 
   log('');
   renderVerdict(dicStats, targetSigma);
+  renderCrackResults(currentGSD());
   updateSteps();
   if (lastField) drawField(lastField); else $('fieldCanvas').classList.add('hidden');
   openSheet('result');
@@ -1300,7 +1513,13 @@ function renderVerdict(dicStats, targetSigma) {
     method: best.name,
     // 2時期を比べるときに必要なのは「1測点」ではなく「き裂を挟む2点」の σ
     pairSigmaMM: limit.pairSigmaMM,
-    pairs: (state.targetPairs ?? []).map((p) => ({ ...p, meanMM: p.meanPx * gsd })),
+    pairs: [
+      ...(state.targetPairs ?? []).map((p) => ({ ...p, meanMM: p.meanPx * gsd })),
+      // 亀裂測点。基準日は「開口 0 ± σ」として記録され、次回の比較で変化が乗る
+      ...(state.crackPairs ?? []).filter((p) => p.ok !== false).map((p) => ({
+        ...p, meanMM: p.meanPx * gsd, sigmaMM: p.sigmaPx * gsd,
+      })),
+    ],
     bulgeMM: cloudState.bulges?.regions?.[0]?.peak != null
       ? cloudState.bulges.regions[0].peak * cloudState.unit.scale
       : null,
