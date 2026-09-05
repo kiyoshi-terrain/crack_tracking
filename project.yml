@@ -16,13 +16,22 @@ options:
   createIntermediateGroups: true
   developmentLanguage: ja
   groupSortPosition: top
+  # Local.xcconfig は各自の手元にだけある（.gitignore 済み）。無くても生成を止めない
+  disabledValidations:
+    - missingConfigFiles
+
+# 署名の Team ID など、人ごとに違う設定は Local.xcconfig に書く（このファイルは触らない）。
+#   cp Local.xcconfig.example Local.xcconfig   → DEVELOPMENT_TEAM を自分の Team ID に
+# 無いときは Xcode が警告を出すだけで、CI（署名なし）はそのまま通る。
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
 
 settings:
   base:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: "" # 実機で動かす際に自分の Team ID を設定してください
     CODE_SIGN_STYLE: Automatic
     SWIFT_STRICT_CONCURRENCY: minimal
 
@@ -44,6 +53,12 @@ targets:
         # （署名を切っている CI のビルドでは通ってしまうので気づけない）。
         # ファイルを置かずに Xcode に生成させる
         GENERATE_INFOPLIST_FILE: YES
+      configs:
+        # 純 Swift の画像処理は -Onone だと 10〜30 倍遅い（配列添字ごとに関数呼び出し）。
+        # Xcode の ▶ は Debug なので、計測ロジックだけは Debug でも最適化して
+        # 現場で「解析中…」が 1 分続くのを避ける。アプリ側の UI はデバッグしやすいまま
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
 
   CrackScan:
     type: application

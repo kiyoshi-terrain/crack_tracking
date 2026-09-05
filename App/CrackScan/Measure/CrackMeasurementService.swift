@@ -8,7 +8,7 @@ import CrackCore
 actor CrackMeasurementService {
 
     struct Input: Sendable {
-        /// 解析対象の輝度画像（線形光）
+        /// 解析対象の輝度画像（線形光・原寸）
         let image: GrayImage
         /// `image` に対応する内部パラメータ
         let intrinsics: CameraIntrinsics
@@ -22,6 +22,8 @@ actor CrackMeasurementService {
         let scale: SurfaceScale
         /// 元画像座標に戻した芯線
         let centerlinesInSourceImage: [[Vec2]]
+        /// 検出に使った縮小率
+        let detectionFactor: Int
     }
 
     private var detector: CrackDetector
@@ -43,26 +45,36 @@ actor CrackMeasurementService {
             scale: scale,
             centerlinesInSourceImage: result.measurements.map { m in
                 m.centerline.map { $0 + input.cropOrigin }
-            }
+            },
+            detectionFactor: result.detectionFactor
         )
     }
 
     /// 指定点の1本だけを計測する。
-    func measureOne(_ input: Input, at point: Vec2) -> CrackMeasurement? {
+    ///
+    /// - Parameter searchRadiusPx: 元画像 px での探索半径
+    func measureOne(_ input: Input, at point: Vec2, searchRadiusPx: Int) -> CrackMeasurement? {
         let scale = SurfaceScale(intrinsics: input.intrinsics, plane: input.plane)
-        return detector.measureCrack(in: input.image, near: point - input.cropOrigin, scale: scale)
+        return detector.measureCrack(
+            in: input.image,
+            near: point - input.cropOrigin,
+            scale: scale,
+            searchRadiusPx: searchRadiusPx
+        )
     }
 }
 
 /// ARFrame から解析入力を組み立てる。
 enum MeasurementInputBuilder {
 
-    /// 解析に使う最大の一辺（px）。
-    /// 48MP 全面をそのまま処理すると数十秒かかるため、
-    /// レティクル内だけを等倍で切り出して精度を保ちつつ処理量を抑える。
-    static let maxAnalysisSide = 1600
+    /// 安全弁としての一辺の上限（px）。
+    ///
+    /// 解析範囲の大きさは `ARCaptureController.analysisRegion(for:)` が縮小率に応じて決め、
+    /// 画面の枠として描いている。ここで黙って切ると描いた枠と食い違うので、
+    /// 通常はここに掛からない。ビューポートが未確定のまま呼ばれたときの保険。
+    static let hardLimitSide = 4200
 
-    /// レティクル領域を切り出して解析入力を作る。
+    /// 解析範囲を切り出して解析入力を作る。
     static func build(
         frame: ARFrame,
         normalizedRegion: CGRect,
@@ -76,17 +88,7 @@ enum MeasurementInputBuilder {
             width: Int(normalizedRegion.width * CGFloat(intrinsics.imageWidth)),
             height: Int(normalizedRegion.height * CGFloat(intrinsics.imageHeight))
         ).clamped(toWidth: intrinsics.imageWidth, height: intrinsics.imageHeight)
-
-        // 大きすぎる場合は中央を残して縮める（縮小ではなくトリミング。
-        // 縮小すると細いひび割れが消えてしまうため）
-        if rect.width > maxAnalysisSide {
-            rect.x += (rect.width - maxAnalysisSide) / 2
-            rect.width = maxAnalysisSide
-        }
-        if rect.height > maxAnalysisSide {
-            rect.y += (rect.height - maxAnalysisSide) / 2
-            rect.height = maxAnalysisSide
-        }
+        rect = AnalysisPlanner.clampRegion(rect, maxSide: hardLimitSide)
 
         guard rect.width > 32, rect.height > 32,
               let image = ImageConversion.grayImage(

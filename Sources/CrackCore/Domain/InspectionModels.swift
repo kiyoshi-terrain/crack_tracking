@@ -43,6 +43,24 @@ public struct InspectionProject: Codable, Identifiable, Sendable, Hashable {
     public var allCracks: [CrackRecord] {
         sessions.flatMap(\.cracks)
     }
+
+    /// 目標幅の選択肢（mm）。
+    ///
+    /// 目標幅は 2 つの役目を持つ。撮影ガイドの「この幅を 3px で撮れる距離」のしきい値と、
+    /// 検出器が狙う幅の級（この幅の 0.8〜4 倍を拾う）。髪の毛級と数 mm の開口を同時には
+    /// 狙えないので、案件ごとに級を選ぶ。石積みの開口なら 1〜3mm、コンクリートの
+    /// ひび割れなら 0.2〜0.3mm が目安。
+    public static let targetWidthPresetsMM: [Double] = [0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0]
+
+    /// 選択肢に現在値を含めた一覧（スライダーで作った 0.25 のような値を消さないため）。
+    public var targetWidthChoicesMM: [Double] {
+        var choices = Self.targetWidthPresetsMM
+        if !choices.contains(where: { abs($0 - targetCrackWidthMM) < 1e-9 }) {
+            choices.append(targetCrackWidthMM)
+            choices.sort()
+        }
+        return choices
+    }
 }
 
 /// 1回の撮影（1つの部位をまとめて撮った単位）。

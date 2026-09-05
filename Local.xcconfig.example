@@ -1,0 +1,7 @@
+// 人ごとに違うビルド設定。コピーして Local.xcconfig を作る（git には入れない）。
+//
+//   cp Local.xcconfig.example Local.xcconfig
+//
+// Team ID は Xcode → Settings → Accounts → 自分の Apple ID → Team の右端、
+// または developer.apple.com の Membership で確認できる。
+DEVELOPMENT_TEAM = XXXXXXXXXX

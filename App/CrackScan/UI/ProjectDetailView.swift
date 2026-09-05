@@ -57,10 +57,17 @@ struct ProjectDetailView: View {
     // MARK: - セクション
 
     private var summarySection: some View {
-        Section("概要") {
+        Section {
             LabeledContent("構造物", value: project.structureName.isEmpty ? "—" : project.structureName)
             LabeledContent("点検者", value: project.inspectorName.isEmpty ? "—" : project.inspectorName)
-            LabeledContent("目標幅", value: String(format: "%.2f mm", project.targetCrackWidthMM))
+            // 目標幅は撮影ガイドのしきい値であり、検出器が狙う幅の級でもある。
+            // 案件を作った後でも変えられないと、石積みの開口（数 mm）を 0.2mm の設定で
+            // 撮って「検出できません」になる
+            Picker("目標幅", selection: $project.targetCrackWidthMM) {
+                ForEach(project.targetWidthChoicesMM, id: \.self) { width in
+                    Text(String(format: "%.2f mm", width)).tag(width)
+                }
+            }
             LabeledContent("ひび割れ", value: "\(project.allCracks.count) 本")
 
             let severe = project.allCracks.filter {
@@ -73,6 +80,10 @@ struct ProjectDetailView: View {
                         .fontWeight(.semibold)
                 }
             }
+        } header: {
+            Text("概要")
+        } footer: {
+            Text("目標幅は「測りたい幅の級」です。撮影ガイドはこの幅を 3px 以上で撮れる距離を案内し、検出はこの幅の 0.8〜4 倍を狙います。石積みの開口なら 1〜3 mm、コンクリートのひび割れなら 0.2〜0.3 mm が目安です。")
         }
     }
 

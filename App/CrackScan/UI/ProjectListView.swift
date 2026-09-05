@@ -82,18 +82,15 @@ struct ProjectListView: View {
                     TextField("点検者", text: $newInspectorName)
                 }
                 Section {
-                    HStack {
-                        Text("目標ひび割れ幅")
-                        Spacer()
-                        Text(String(format: "%.2f mm", newTargetWidth))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                    Picker("目標ひび割れ幅", selection: $newTargetWidth) {
+                        ForEach(InspectionProject.targetWidthPresetsMM, id: \.self) { width in
+                            Text(String(format: "%.2f mm", width)).tag(width)
+                        }
                     }
-                    Slider(value: $newTargetWidth, in: 0.05...1.0, step: 0.05)
                 } header: {
                     Text("計測設定")
                 } footer: {
-                    Text("この幅を 3px 以上で撮れる距離まで近づくよう、撮影画面でガイドします。細くするほど寄る必要があります。")
+                    Text("「測りたい幅の級」です。この幅を 3px 以上で撮れる距離まで近づくよう撮影画面でガイドし、検出はこの幅の 0.8〜4 倍を狙います。石積みの開口なら 1〜3 mm、コンクリートのひび割れなら 0.2〜0.3 mm。後から案件画面で変えられます。")
                 }
             }
             .navigationTitle("新規案件")

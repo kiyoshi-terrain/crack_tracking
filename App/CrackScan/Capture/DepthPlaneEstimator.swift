@@ -47,11 +47,8 @@ public enum DepthPlaneEstimator {
         let depthStride = CVPixelBufferGetBytesPerRow(depthMap)
 
         // デプスマップ解像度での内部パラメータ
-        let imageResolution = frame.camera.imageResolution
-        let intrinsics = cameraIntrinsics(frame: frame).scaled(
-            toWidth: depthWidth,
-            height: depthHeight
-        )
+        let fullIntrinsics = cameraIntrinsics(frame: frame)
+        let intrinsics = fullIntrinsics.scaled(toWidth: depthWidth, height: depthHeight)
 
         let x0 = max(0, Int(normalizedRegion.minX * CGFloat(depthWidth)))
         let x1 = min(depthWidth, Int(normalizedRegion.maxX * CGFloat(depthWidth)))
@@ -86,10 +83,9 @@ public enum DepthPlaneEstimator {
         guard points.count >= 32, let fit = PlaneFitter.fitRobust(points: points) else { return nil }
 
         let center = Vec2(
-            Double(normalizedRegion.midX) * Double(imageResolution.width),
-            Double(normalizedRegion.midY) * Double(imageResolution.height)
+            Double(normalizedRegion.midX) * Double(fullIntrinsics.imageWidth),
+            Double(normalizedRegion.midY) * Double(fullIntrinsics.imageHeight)
         )
-        let fullIntrinsics = cameraIntrinsics(frame: frame)
         let centerRay = fullIntrinsics.viewRay(through: center)
         let centerDistance = fit.plane.intersection(rayDirection: centerRay)?.z ?? 0
 
@@ -105,10 +101,14 @@ public enum DepthPlaneEstimator {
     ///
     /// ARKit の `intrinsics` は列優先の simd_float3x3 で、キャプチャ画像
     /// （常に横長）の解像度に対応します。
+    ///
+    /// 高解像度フレームでは `camera.imageResolution` と `capturedImage` の画素数が
+    /// 食い違う可能性に備え、**実際の画素バッファの寸法**に合わせて拡縮します。
+    /// 内部パラメータは画素数に比例するので、ここがずれると mm/px がそのまま倍率分ずれます。
     public static func cameraIntrinsics(frame: ARFrame) -> CameraIntrinsics {
         let m = frame.camera.intrinsics
         let resolution = frame.camera.imageResolution
-        return CameraIntrinsics(
+        let intrinsics = CameraIntrinsics(
             fx: Double(m[0][0]),
             fy: Double(m[1][1]),
             cx: Double(m[2][0]),
@@ -116,6 +116,14 @@ public enum DepthPlaneEstimator {
             imageWidth: Int(resolution.width),
             imageHeight: Int(resolution.height)
         )
+        let buffer = frame.capturedImageSize
+        let bufferWidth = Int(buffer.width)
+        let bufferHeight = Int(buffer.height)
+        guard bufferWidth > 0, bufferHeight > 0,
+              bufferWidth != intrinsics.imageWidth || bufferHeight != intrinsics.imageHeight else {
+            return intrinsics
+        }
+        return intrinsics.scaled(toWidth: bufferWidth, height: bufferHeight)
     }
 
     /// 画像系カメラ座標（X=右, Y=下, Z=前方）の点を ARKit のワールド座標へ変換する。
@@ -134,5 +142,16 @@ public enum DepthPlaneEstimator {
         )
         let world = frame.camera.transform * arkitCameraPoint
         return Vec3(Double(world.x), Double(world.y), Double(world.z))
+    }
+}
+
+extension ARFrame {
+    /// `capturedImage` の実際の画素数。解析・オーバーレイの座標系はこれに合わせる
+    /// （`camera.imageResolution` ではなく）。
+    var capturedImageSize: CGSize {
+        CGSize(
+            width: CVPixelBufferGetWidth(capturedImage),
+            height: CVPixelBufferGetHeight(capturedImage)
+        )
     }
 }
