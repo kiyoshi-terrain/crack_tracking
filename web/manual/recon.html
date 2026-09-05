@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>下見チェックリスト — σ実測ツール</title>
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0b0f0d">
+<style>
+  :root {
+    --ground:#0b0f0d; --panel:#161d19; --panel-2:#1c2620; --line:#253028;
+    --ink:#e6ece8; --ink-soft:#94a69c; --ink-dim:#67766d;
+    --amber:#d99a2b; --amber-dim:#8a6420; --forest:#4a9d72; --critical:#c9564e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+    line-height:1.8; font-size:15.5px;
+  }
+  .mono,code,td.num,th.num { font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-variant-numeric:tabular-nums; }
+  code { background:#0c110e; border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.9em; }
+
+  .wrap { max-width:820px; margin:0 auto; padding:0 20px 90px; }
+
+  header.top { border-bottom:1px solid var(--line); background:linear-gradient(180deg,#131a16,var(--ground)); padding:26px 20px 20px; margin-bottom:28px; }
+  header.top .inner { max-width:820px; margin:0 auto; }
+  header.top h1 { margin:0; font-size:23px; letter-spacing:.01em; }
+  header.top p { margin:7px 0 0; color:var(--ink-soft); font-size:13.5px; max-width:70ch; }
+  header.top .meta { margin-top:12px; font-size:12px; color:var(--ink-dim); }
+  header.top a { color:var(--amber); }
+
+  section { margin-bottom:40px; scroll-margin-top:18px; }
+  h2 { font-size:19px; margin:0 0 4px; padding-bottom:9px; border-bottom:1px solid var(--line); }
+  h2 .n { color:var(--amber); font-family:SFMono-Regular,Menlo,monospace; margin-right:9px; font-size:15px; }
+  h3 { font-size:15px; margin:26px 0 6px; color:var(--ink); }
+  p { margin:9px 0; }
+  ul { padding-left:1.3em; margin:9px 0; }
+  li { margin:4px 0; }
+  strong,b { color:#fff; }
+
+  .lead { color:var(--ink-soft); font-size:14px; margin-top:10px; }
+  .box { border:1px solid var(--line); background:var(--panel); border-radius:9px; padding:13px 16px; margin:15px 0; }
+  .box.key { border-color:var(--amber-dim); background:rgba(217,154,43,.07); }
+  .box.warn { border-color:rgba(217,154,43,.42); background:rgba(217,154,43,.08); }
+  .box.bad { border-color:rgba(201,86,78,.42); background:rgba(201,86,78,.08); }
+  .box .t { font-weight:700; display:block; margin-bottom:3px; }
+  .box.key .t { color:var(--amber); }
+  .box.bad .t { color:var(--critical); }
+
+  table { width:100%; border-collapse:collapse; font-size:13.5px; margin:14px 0; display:block; overflow-x:auto; }
+  th,td { text-align:left; padding:8px 11px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--ink-soft); font-weight:600; font-size:12.5px; white-space:nowrap; }
+  td.num,th.num { text-align:right; font-family:SFMono-Regular,Menlo,monospace; }
+  td.ok { color:var(--forest); }
+  td.ng { color:var(--critical); }
+  /* 記入欄。印刷して鉛筆で書けるように高さを持たせる */
+  td.fill { height:34px; background:rgba(255,255,255,.02); }
+
+  /* チェック項目。指で押せる大きさにする（現地は手袋・雨） */
+  .ck { display:flex; gap:11px; align-items:flex-start; padding:9px 12px; margin:6px 0;
+        border:1px solid var(--line); background:var(--panel); border-radius:8px; cursor:pointer; }
+  .ck:has(input:checked) { border-color:rgba(74,157,114,.5); background:rgba(74,157,114,.08); }
+  .ck:has(input:checked) .body { color:var(--ink-dim); text-decoration:line-through; text-decoration-color:var(--ink-dim); }
+  .ck input { flex:none; width:20px; height:20px; margin:5px 0 0; accent-color:var(--forest); }
+  .ck .body { min-width:0; }
+  .ck .why { display:block; color:var(--ink-soft); font-size:13px; margin-top:2px; }
+  .ck.big { border-color:var(--amber-dim); background:rgba(217,154,43,.07); }
+
+  .tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:18px 0 0; }
+  button { font:inherit; font-size:13.5px; color:var(--ink-soft); background:var(--panel-2);
+           border:1px solid var(--line); border-radius:8px; padding:8px 14px; cursor:pointer; }
+  button:hover { color:var(--ink); border-color:var(--amber-dim); }
+  .count { color:var(--ink-dim); font-size:13px; font-family:SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; }
+
+  a { color:var(--amber); }
+  hr { border:0; border-top:1px solid var(--line); margin:32px 0; }
+  footer { max-width:820px; margin:0 auto; padding:22px 20px 60px; color:var(--ink-dim); font-size:12.5px; border-top:1px solid var(--line); }
+
+  @media print {
+    body { background:#fff; color:#000; font-size:10pt; line-height:1.55; }
+    header.top { background:none; padding:0 0 12px; margin-bottom:16px; }
+    header.top .meta, .tools, .noprint { display:none; }
+    .wrap { padding:0; max-width:none; }
+    .box,pre,table,th,td { border-color:#bbb; background:#fff; }
+    strong,b,h1,h2,h3 { color:#000; }
+    section { page-break-inside:avoid; margin-bottom:22px; }
+    .ck { border-color:#bbb; background:#fff; padding:5px 8px; margin:3px 0; page-break-inside:avoid; }
+    .ck:has(input:checked) { background:#fff; border-color:#bbb; }
+    .ck:has(input:checked) .body { color:#000; text-decoration:none; }
+    .ck .why { color:#444; }
+    .ck input { appearance:none; -webkit-appearance:none; width:13px; height:13px; border:1px solid #000; border-radius:2px; }
+    td.fill { height:30px; background:#fff; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="inner">
+    <h1>下見チェックリスト</h1>
+    <p>基準セットを撮り始める前に、一度だけやることです。<b>雨天でも全部できます</b>
+       — というより、3 章は雨の日にしか取れません。</p>
+    <div class="meta">
+      <a href="./">取扱説明書に戻る</a> ·
+      <a href="../">ツールを開く</a> ·
+      印刷して持って行けます（ブラウザの印刷 → A4）
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ══════════════════════════════════════ -->
+<section id="never">
+<h2><span class="n">0</span>雨の日にやってはいけないこと</h2>
+
+<div class="box bad">
+  <span class="t">濡れた壁で基準セットを撮らない</span>
+  ZNSSD は明るさの違いには強いのですが、<b>濡れには勝てません</b>。
+  濡れた壁を基準にすると、<b>今後の再訪がすべて「濡れた壁」との照合</b>になります。
+  しかも比較モードは濡れを「相関低下」として出すので、<b>き裂の進展とまったく同じ見た目</b>になります。
+</div>
+
+<div class="box bad">
+  <span class="t">濡れた面をスキャンしない</span>
+  鏡面反射で LiDAR は戻りが荒れ、写真測量はハイライトが視点ごとに動いて点が湧きます。
+  面の粗さ（＝検出限界）が実力より悪く出ます。
+</div>
+
+<p class="lead">今日は<b>計測しません</b>。計測が成立するかどうかを確かめに行きます。
+記録用の写真は手持ちで好きなだけ撮って構いません — プロトコルの対象外です。</p>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="stand">
+<h2><span class="n">1</span>立ち位置 — ここで案件の成否が決まる</h2>
+
+<p>検出限界を決めているのは手法ではなく <b>mm/px</b> です。つまり<b>レンズと距離</b>。
+ターゲットを貼っても、点群を足しても、この表は変わりません。
+まずここを確かめないと、他の全部が無駄になります。</p>
+
+<label class="ck big"><input type="checkbox" data-k="s1a"><span class="body">
+  <b>望遠（120mm 相当）で対象が画角に収まる立ち位置があるか</b>
+  <span class="why">広角しか取れないなら、この現場では 0.1mm 級は成立しません。先に知るべきです。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s1b"><span class="body">
+  <b>その位置から壁までの距離を測る</b>
+  <span class="why">レーザー距離計。無ければ歩測でも桁は分かります。下の表を引くのに使います。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s1c"><span class="body">
+  <b>斜角がきつくないか（正面に立てるか）</b>
+  <span class="why">斜めでも点群があれば幾何は正しく出ますが、画質は落ちます。ツールは <b>30° を超えると橙</b>を出します。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s1d"><span class="body">
+  <b>その位置に毎回戻れるか。地面に印を打てるか</b>
+  <span class="why">舗装ならマーキング、土なら杭。再訪ガイドは画像しか見ないので、視差は実際の並進でしか止まりません。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s1e"><span class="body">
+  <b>三脚を立てられるか。人や車が横切らないか</b>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s1f"><span class="body">
+  <b>その場で 1 枚だけ撮って、ツールに読ませる</b>
+  <span class="why">1 枚でも mm/px と分解能は出ます。<b>ただし濡れた壁の模様判定は当てになりません</b>
+  — 見るのは分解能だけにしてください。</span>
+</span></label>
+
+<h3>その場で引く表 — mm/px（4032px 幅・35mm 換算）</h3>
+<table>
+<tr><th>距離</th><th class="num">超広角 13mm</th><th class="num">広角 24mm</th><th class="num">望遠 120mm</th></tr>
+<tr><td>3 m</td><td class="num">2.06</td><td class="num">1.12</td><td class="num ok">0.22</td></tr>
+<tr><td>5 m</td><td class="num">3.43</td><td class="num">1.86</td><td class="num ok">0.37</td></tr>
+<tr><td>8 m</td><td class="num">5.49</td><td class="num">2.98</td><td class="num ok">0.60</td></tr>
+<tr><td>10 m</td><td class="num">6.87</td><td class="num">3.72</td><td class="num ok">0.74</td></tr>
+<tr><td>15 m</td><td class="num">10.30</td><td class="num">5.58</td><td class="num">1.12</td></tr>
+<tr><td>20 m</td><td class="num">13.74</td><td class="num">7.44</td><td class="num">1.49</td></tr>
+</table>
+
+<h3>き裂の開きの検出限界 3σ [mm]</h3>
+<table>
+<tr><th>距離</th><th class="num">超広角 13mm</th><th class="num">広角 24mm</th><th class="num">望遠 120mm</th></tr>
+<tr><td>3 m</td><td class="num ng">0.262</td><td class="num">0.142</td><td class="num ok">0.028</td></tr>
+<tr><td>5 m</td><td class="num ng">0.437</td><td class="num">0.237</td><td class="num ok">0.047</td></tr>
+<tr><td>8 m</td><td class="num ng">0.699</td><td class="num ng">0.379</td><td class="num ok">0.076</td></tr>
+<tr><td>10 m</td><td class="num ng">0.874</td><td class="num ng">0.474</td><td class="num ok">0.095</td></tr>
+<tr><td>15 m</td><td class="num ng">1.311</td><td class="num ng">0.710</td><td class="num">0.142</td></tr>
+<tr><td>20 m</td><td class="num ng">1.748</td><td class="num ng">0.947</td><td class="num">0.189</td></tr>
+</table>
+
+<div class="box warn">
+  <span class="t">この表は設計値です</span>
+  σ<sub>px</sub> = 0.03 px と仮定した計算値で、<b>実写では未検証</b>です。
+  現物の σ を測るのがこのツールの目的なので、初回の連写で置き換わります。
+  ここでは「桁が合っているか」の判断にだけ使ってください。
+</div>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="block">
+<h2><span class="n">2</span>ブロックを選ぶ</h2>
+
+<p>追いたいのはき裂の幅だけでなく、<b>本体から分離したブロックが落ちるかどうか</b>です。
+傾斜と迫り出しは「周囲の安定した壁面に対する相対角」として測ります。
+その前提が現地で成り立っているかを確かめます。</p>
+
+<label class="ck big"><input type="checkbox" data-k="s2a"><span class="body">
+  <b>候補ブロックの周りに、動いていないと言える壁が回っているか</b>
+  <span class="why">これが無いブロックは原理的に測れません。基準にする面が存在しないためです。
+  ブロックの外周 1 個ぶんくらいは健全な石が要ります。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s2b"><span class="body">
+  <b>候補ブロックの面の縦横を実測する</b>
+  <span class="why">大きいほど傾斜が精度良く出ます（腕の長さで割るため）。300mm 角と 900mm 角で 1 桁違います。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s2c"><span class="body">
+  <b>奥行を実測する（見えている小口・隅角部から）</b>
+  <span class="why">転倒余裕（tanθ = 奥行 ÷ 高さ）の分母。無ければ推定でも良いので記録する。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s2d"><span class="body">
+  <b>き裂が周囲に回りきっているか</b>
+  <span class="why">上下だけなら両側から拘束が残っています。<b>輪郭が閉じた瞬間に拘束が消える</b>ので、
+  傾斜より早い警報になります。回っている辺・切れている辺をスケッチする。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s2e"><span class="body">
+  <b>目視で分かる傾斜・迫り出しがあるか</b>
+  <span class="why">手積みの壁は元から不陸があります。<b>絶対値では判定しません</b>が、
+  初期状態として記録しておくと、後で「元からか、進んだか」を言えます。斜めから見ると分かりやすい。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s2f"><span class="body">
+  <b>候補ブロックに番号を振り、正面と斜めから記録写真を撮る</b>
+  <span class="why">後で輪郭を囲むときの識別に要ります。</span>
+</span></label>
+
+<h3>ブロック寸法と傾斜の検出限界（2 時期 3σ・設計値）</h3>
+<table>
+<tr><th>ブロック</th><th class="num">点群から</th><th class="num">写真から（5m）</th><th class="num">上端の迫り出し差</th></tr>
+<tr><td>300 mm 角</td><td class="num">0.585°</td><td class="num">0.473°</td><td class="num">約 3 mm</td></tr>
+<tr><td>600 mm 角</td><td class="num">0.146°</td><td class="num ok">0.118°</td><td class="num">約 1.5 mm</td></tr>
+<tr><td>900 mm 角</td><td class="num">0.065°</td><td class="num ok">0.053°</td><td class="num">約 1 mm</td></tr>
+</table>
+<p class="lead">点群は σ<sub>z</sub>=5mm・6400 点/m²、写真は面内 σ=0.035mm を仮定した計算値です。
+いずれも<b>実写では未検証</b>。</p>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="rain">
+<h2><span class="n">3</span>雨の日にしか見えないもの</h2>
+
+<div class="box key">
+  <span class="t">今日の本命はこれです</span>
+  水の通り道は、乾いていると<b>まったく分かりません</b>。しかも凍結融解の駆動力そのものなので、
+  剥落危険度の一次情報としては傾斜より強い。<b>計測写真ではないので手持ちで構いません。</b>
+</div>
+
+<label class="ck"><input type="checkbox" data-k="s3a"><span class="body">
+  <b>き裂から水が出ている／滲んでいる箇所</b>
+  <span class="why">背面まで水が回っている証拠。ブロックの背後が開いているということです。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s3b"><span class="body">
+  <b>抜けた目地・水が溜まる棚部・天端からの回り込み</b>
+  <span class="why">水の入口。ここを塞げるかどうかは対策の話に直結します。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s3c"><span class="body">
+  <b>濡れムラ（吸水の差）</b>
+  <span class="why">濃く濡れる＝空隙が多い＝風化が進んでいる。面的な劣化度が目視で読めます。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s3d"><span class="body">
+  <b>雨が上がったら、乾き方の差をもう一度撮る</b>
+  <span class="why">最後まで濡れが残る場所が、水を保持している場所です。可能なら 1〜2 時間後に。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s3e"><span class="body">
+  <b>植生・土の押し出し・排水の状況</b>
+  <span class="why">点群では手前の草は外れ値として落とされますが、原因としては記録が要ります。</span>
+</span></label>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="env">
+<h2><span class="n">4</span>再訪の条件を決める</h2>
+
+<p>追跡測定は<b>毎回同じ条件で撮れること</b>が生命線です。次回以降を縛る条件を今日決めます。</p>
+
+<label class="ck"><input type="checkbox" data-k="s4a"><span class="body">
+  <b>壁の方位をコンパスで測る</b>
+  <span class="why">日陰になる時間帯を後から計算できます。<b>撮影時刻を固定する</b>のに要ります。
+  影の構造が変わると σ の 400 倍の偽変位が出るので、これは重要です。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s4b"><span class="body">
+  <b>庇・樹木・電柱など、時刻で影を落とすものを記録する</b>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s4c"><span class="body">
+  <b>温度計を置ける場所を決める</b>
+  <span class="why">温度分離には毎回の気温が要ります。日射の当たらない場所で、毎回同じ位置。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s4d"><span class="body">
+  <b>手の届く高さに、模様のある不動点候補があるか</b>
+  <span class="why">再訪間の σ を実測するための基準です。模様があればターゲットは要りません。
+  乏しければ、そこにだけ円形ターゲットを貼ります。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s4e"><span class="body">
+  <b>圏外か。電波はあるか</b>
+  <span class="why">ツールはオフラインで動きますが、<b>現地に着く前に一度開いて</b>おく必要があります。</span>
+</span></label>
+
+<label class="ck"><input type="checkbox" data-k="s4f"><span class="body">
+  <b>立入の許可・鍵・所有者への連絡先</b>
+</span></label>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="gear">
+<h2><span class="n">5</span>持ち物</h2>
+<label class="ck"><input type="checkbox" data-k="s5a"><span class="body">レーザー距離計 <span class="why">立ち位置の距離。これが今日の主目的の 1 つ</span></span></label>
+<label class="ck"><input type="checkbox" data-k="s5b"><span class="body">コンベックス（5m 以上） <span class="why">ブロックの実寸・目地幅</span></span></label>
+<label class="ck"><input type="checkbox" data-k="s5c"><span class="body">チョークかマーキングスプレー、杭 <span class="why">立ち位置の印</span></span></label>
+<label class="ck"><input type="checkbox" data-k="s5d"><span class="body">温度計 <span class="why">置き場所を決めるついでに、今日の気温も記録</span></span></label>
+<label class="ck"><input type="checkbox" data-k="s5e"><span class="body">スマホ（コンパス・記録写真・このページ） <span class="why">出発前に一度開いてキャッシュさせる</span></span></label>
+<label class="ck"><input type="checkbox" data-k="s5f"><span class="body">ヘルメット・雨具・滑らない靴</span></label>
+<label class="ck"><input type="checkbox" data-k="s5g"><span class="body">スケッチ用の紙かこの印刷物、油性ペン <span class="why">雨で鉛筆は滲みます</span></span></label>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="safety">
+<h2><span class="n">6</span>安全</h2>
+<div class="box bad">
+  <span class="t">剥落を疑っているブロックの直下に立たない</span>
+  吸水して重くなっている状態です。凍結融解の直後は特に落ちます。
+  観察は斜めから、離れて。<b>濡れた大谷石は想像以上に滑ります。</b>
+</div>
+<label class="ck"><input type="checkbox" data-k="s6a"><span class="body">退避経路と、単独行動なら連絡先を確認した</span></label>
+<label class="ck"><input type="checkbox" data-k="s6b"><span class="body">法面・擁壁の上に乗らない。天端の亀裂は見えない</span></label>
+</section>
+
+<!-- ══════════════════════════════════════ -->
+<section id="bring">
+<h2><span class="n">7</span>持ち帰る数字</h2>
+<p>これが揃うと、<b>この現場でこの方法が成立するか</b>に数字で答えが出ます。</p>
+
+<table>
+<tr><th>項目</th><th>値</th><th>備考</th></tr>
+<tr><td>立ち位置から壁まで</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>使えるレンズ（35mm 換算）</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>斜角の見込み</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>候補ブロック ①　面の縦 × 横</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>　　　　　　　　　奥行</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>　　　　　　　　　き裂は何辺に回っているか</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>候補ブロック ②　面の縦 × 横</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>　　　　　　　　　奥行</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>　　　　　　　　　き裂は何辺に回っているか</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>目地幅</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>壁の方位</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>日陰になる時間帯の見込み</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>不動点候補の位置と模様の有無</td><td class="fill"></td><td class="fill"></td></tr>
+<tr><td>今日の気温・天候</td><td class="fill"></td><td class="fill"></td></tr>
+</table>
+
+<div class="box key">
+  <span class="t">次に来る日の条件</span>
+  <b>乾いた壁面・曇天か日陰・上で決めた時刻・同じ立ち位置。</b>
+  この 4 つが揃った日に、初めて基準セットを撮ります。
+</div>
+
+<div class="tools noprint">
+  <button type="button" id="print">印刷する</button>
+  <button type="button" id="clear">チェックを全部消す</button>
+  <span class="count" id="count"></span>
+</div>
+</section>
+
+</div>
+
+<footer>
+  チェックの状態はこの端末のブラウザにだけ保存されます（サーバーには何も送りません）。<br>
+  <a href="./">取扱説明書</a> · <a href="../">σ実測ツール</a>
+</footer>
+
+<script>
+// チェックの状態を端末に残す。現地では往復するので、
+// 画面を閉じたら消えるのでは使い物になりません。
+(function () {
+  var KEY = 'recon-checklist-v1';
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.ck input[type=checkbox]'));
+  var countEl = document.getElementById('count');
+
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+
+  function render() {
+    var done = boxes.filter(function (b) { return b.checked; }).length;
+    countEl.textContent = done + ' / ' + boxes.length;
+  }
+  function save() {
+    var out = {};
+    boxes.forEach(function (b) { if (b.checked) out[b.dataset.k] = 1; });
+    try { localStorage.setItem(KEY, JSON.stringify(out)); } catch (e) { /* 容量超過は無視 */ }
+    render();
+  }
+
+  boxes.forEach(function (b) {
+    b.checked = !!saved[b.dataset.k];
+    b.addEventListener('change', save);
+  });
+  render();
+
+  document.getElementById('print').addEventListener('click', function () { window.print(); });
+  document.getElementById('clear').addEventListener('click', function () {
+    boxes.forEach(function (b) { b.checked = false; });
+    save();
+  });
+})();
+</script>
+
+</body>
+</html>

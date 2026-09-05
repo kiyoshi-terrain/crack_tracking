@@ -6,7 +6,7 @@ import { integerSearch, refineSubpixel, measureDisplacementField, estimateGlobal
 import { downsample } from '../src/image.js';
 import { fitAffine, applyAffine, residuals } from '../src/transform.js';
 import { summarize, detectionLimit } from '../src/sigma.js';
-import { speckleQuality, focusScore } from '../src/speckle.js';
+import { speckleQuality, focusScore, SATURATED_DARK_LINEAR, SATURATED_BRIGHT_LINEAR } from '../src/speckle.js';
 import { makeBlobs, renderBlobs } from './synthetic.mjs';
 import { runTargetTests } from './targets.mjs';
 import { runPointCloudTests } from './pointcloud.mjs';
@@ -18,6 +18,7 @@ import { runCaptureTests } from './capture.mjs';
 import { runLensCalTests } from './lenscal.mjs';
 import { runCloudAlignTests } from './cloudalign.mjs';
 import { runParallaxTests } from './parallax.mjs';
+import { runCrackLineTests } from './crackline.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -239,6 +240,32 @@ runCaptureTests(check, near);
 runLensCalTests(check, near);
 runCloudAlignTests(check, near);
 runParallaxTests(check, near);
+runCrackLineTests(check, near);
+
+// ---------------------------------------------------------------- 飽和は sRGB で判定
+console.log('\n== 飽和の判定（線形光の暗いグレーは黒つぶれではない） ==');
+{
+  // 暗いが十分な模様: 線形光 0.01〜0.05 の斑点。sRGB では 28〜63/255 に相当し、黒つぶれではない
+  const w = 160, h = 160;
+  const dark = new Float32Array(w * h);
+  let seed = 3;
+  const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < dark.length; i++) dark[i] = 0.01 + 0.04 * rnd();
+  const qDark = speckleQuality({ width: w, height: h, data: dark }, { subsetHalf: 9 });
+  check('線形光 0.01〜0.05 の暗い模様を飽和と数えない', qDark.saturatedRatio < 0.01,
+    `飽和 ${(qDark.saturatedRatio * 100).toFixed(2)}%`);
+  check('しきい値は sRGB 0.02 / 0.98 の線形光換算',
+    near(SATURATED_DARK_LINEAR, 0.00155, 1e-5) && near(SATURATED_BRIGHT_LINEAR, 0.955, 1e-3),
+    `${SATURATED_DARK_LINEAR.toFixed(5)} / ${SATURATED_BRIGHT_LINEAR.toFixed(4)}`);
+  // 本当に張り付いた領域（真っ黒 0 と真っ白 1 が 15% ずつ）は数える
+  const clipped = Float32Array.from(dark);
+  for (let i = 0; i < clipped.length * 0.15; i++) clipped[i] = 0;
+  for (let i = clipped.length - 1; i > clipped.length * 0.85; i--) clipped[i] = 1;
+  const qClip = speckleQuality({ width: w, height: h, data: clipped }, { subsetHalf: 9 });
+  check('0 / 1 に張り付いた画素は飽和と数える', qClip.saturatedRatio > 0.29 && qClip.saturatedRatio < 0.31,
+    `飽和 ${(qClip.saturatedRatio * 100).toFixed(1)}%`);
+  check('飽和が 10% を超えると good は fair に落ちる', qClip.verdict === 'fair' && /白飛び/.test(qClip.reason));
+}
 
 // ---------------------------------------------------------------- オフライン
 console.log('\n== サービスワーカー ==');

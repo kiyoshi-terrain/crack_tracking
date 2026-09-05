@@ -516,6 +516,8 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     // これがこの比較の「担保された精度」そのもの
     sigmaCrossPx: spreads.length ? spreads[spreads.length >> 1] : null,
     sigmaAPx: Number.isFinite(sigmaAPx) ? sigmaAPx : null,
+    // 亀裂測点（crackline.js）が同じ床を敷けるように返す
+    systematicFloorPx,
     stats: {
       evaluated: cells.length,
       significant: significantCells.length,

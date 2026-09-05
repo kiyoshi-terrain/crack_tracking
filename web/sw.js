@@ -6,7 +6,7 @@
 //
 // 更新方法: ファイルを変えたら CACHE の版を上げる。
 
-const CACHE = 'sigma-tool-v28';
+const CACHE = 'sigma-tool-v29';
 
 // src/ 配下のモジュールは**全部**並べること。1本でも漏れると、
 // 圏外でその機能だけ静かに動かなくなる（targets.js が実際に漏れていた）。
@@ -19,6 +19,7 @@ const SHELL = [
   './icon.svg',
   './manual/',
   './manual/index.html',
+  './manual/recon.html',
   './calib/',
   './calib/index.html',
   './testpattern/',
@@ -48,6 +49,7 @@ const SHELL = [
   './src/historypanel.js',
   './src/version.js',
   './src/lenscal.js',
+  './src/crackline.js',
 ];
 
 // 取り直しは必ず HTTP キャッシュを素通りさせる（cache: 'reload'）。

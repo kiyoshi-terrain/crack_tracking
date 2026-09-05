@@ -14,7 +14,8 @@ import { measureEpochChange, groupSignificant, fitTransformRobust } from './chan
 import { decodeFile, toGray, downsample } from './image.js';
 import { measureDisplacementField, estimateGlobalShift } from './dic.js';
 import { residuals } from './transform.js';
-import { summarize } from './sigma.js';
+import { summarize, median } from './sigma.js';
+import { crackOpeningEpoch, crackFrame } from './crackline.js';
 import { listBaselines, getBaseline } from './store.js';
 import { setBaseline as setCaptureBaseline, liveActive, toggleLive } from './capturepanel.js';
 import { closeSheet } from './shell.js';
@@ -31,6 +32,8 @@ let getLens = () => null;
 let getSurface = () => null;
 let onChange = () => {};
 let baseFiles = [];
+let baseCracks = [];      // 基準に保存された亀裂測点の線（基準画像の画素座標）
+let onMeasurement = () => {};
 let lastOutcome = null;   // 'changed' | 'surface' | 'quiet' | null
 
 export function initComparePanel(options = {}) {
@@ -40,6 +43,7 @@ export function initComparePanel(options = {}) {
   getLens = options.getLens ?? (() => null);
   getSurface = options.getSurface ?? (() => null);
   onChange = options.onChange ?? (() => {});
+  onMeasurement = options.onMeasurement ?? (() => {});
 
   $('compareLoad').addEventListener('click', () => $('compareInput').click());
   $('compareInput').addEventListener('change', (e) => {
@@ -47,6 +51,7 @@ export function initComparePanel(options = {}) {
       (f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name)
     );
     baseFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    baseCracks = [];
     $('compareBaseInfo').textContent = baseFiles.length
       ? `${baseFiles.length} 枚（1枚目が基準、2枚目を基準日の σ に使います）`
       : '';
@@ -84,8 +89,10 @@ async function useSavedBaseline() {
   const row = await getBaseline(name);
   if (!row) { banner('warn', '読み出せませんでした', '保存が消えている可能性があります。'); return; }
   baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
+  baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
   $('compareBaseInfo').textContent =
-    `基準「${name}」 ${baseFiles.length} 枚（${row.savedAt.slice(0, 10)} 保存）`;
+    `基準「${name}」 ${baseFiles.length} 枚（${row.savedAt.slice(0, 10)} 保存）`
+    + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
   onChange();
 }
 
@@ -102,7 +109,9 @@ async function startRevisit() {
 
   // 比較用の基準もこの測点に揃える（撮影後そのまま「変化を抽出」できる）
   baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
-  $('compareBaseInfo').textContent = `基準「${name}」 ${baseFiles.length} 枚`;
+  baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
+  $('compareBaseInfo').textContent = `基準「${name}」 ${baseFiles.length} 枚`
+    + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
 
   const refImage = await decodeFile(baseFiles[0]);
   const factor = Math.max(1, Math.round(refImage.width / 420));
@@ -216,7 +225,20 @@ async function run() {
       return;
     }
 
-    render(result, grayA, { sigmaAPx, usedFrames: used.length, totalFrames: frames.length });
+    // 亀裂測点。基準に保存された線の両側で、2時期の相対変位を取る。
+    // step は上の measureEpochChange と同じ 40。margin はサブセットが線をまたがない幅
+    const crackRows = baseCracks.map((crack) => ({
+      crack,
+      ...crackOpeningEpoch(result.cells, crack, {
+        margin: subsetHalf + 5,
+        depth: 40 * 4,
+        systematicFloorPx: result.systematicFloorPx ?? 0.02,
+      }),
+    }));
+
+    render(result, grayA, {
+      sigmaAPx, usedFrames: used.length, totalFrames: frames.length, crackRows, frames: used,
+    });
   } catch (err) {
     lastOutcome = null;
     banner('bad', 'エラー', escapeHtml(err.message));
@@ -324,6 +346,92 @@ function render(result, grayA, context) {
 
   status(verdict);
   drawMap(result, grayA, moved);
+  renderCracks(result, grayA, context, gsd);
+}
+
+/**
+ * 亀裂測点の結果。表にして、経時管理が拾える形（ターゲット対と同じ棚）で渡す。
+ * 開口は「基準からの変化」。基準日には 0 ± σ が記録されている前提。
+ */
+function renderCracks(result, grayA, context, gsd) {
+  const el = $('compareCracks');
+  const rows = context.crackRows ?? [];
+  if (!el) return;
+  if (!rows.length) { el.innerHTML = ''; return; }
+  const fmt = (px, signed = false) => {
+    const v = gsd ? px * gsd : px;
+    const unit = gsd ? 'mm' : 'px';
+    return `${signed && v >= 0 ? '+' : ''}${v.toFixed(gsd ? 3 : 4)} ${unit}`;
+  };
+  const trs = rows.map((r) => {
+    const f = crackFrame(r.crack);
+    if (!r.ok) {
+      return `<tr><td>${escapeHtml(r.crack.label)}</td><td>${f?.orientation ?? ''}</td>`
+        + `<td colspan="4" class="note" style="padding:6px 8px">${escapeHtml(r.reason ?? '算出できませんでした')}</td></tr>`;
+    }
+    const sig = Math.abs(r.openingPx) > result.k * r.sePx;
+    const shearSig = Math.abs(r.shearPx) > result.k * r.seShearPx;
+    const ex = r.excluded ?? {};
+    const excludedNote = (ex.decorrelated || ex.illumination)
+      ? `<br><span class="note">除外 相関低下 ${ex.decorrelated ?? 0}・影 ${ex.illumination ?? 0}</span>` : '';
+    return `<tr>
+      <td>${escapeHtml(r.crack.label)}</td><td>${f?.orientation ?? ''}</td>
+      <td class="num"${sig ? ' style="color:var(--critical);font-weight:700"' : ''}>${fmt(r.openingPx, true)}<br><span class="note">± ${fmt(r.sePx)}</span></td>
+      <td class="num"${shearSig ? ' style="color:var(--amber);font-weight:700"' : ''}>${fmt(r.shearPx, true)}<br><span class="note">± ${fmt(r.seShearPx)}</span></td>
+      <td>${sig ? '<b>有意</b>' : '限界内'}${shearSig ? '・ずれ有意' : ''}</td>
+      <td class="num">${r.n1} / ${r.n2}${excludedNote}</td></tr>`;
+  });
+  el.innerHTML = `
+    <h3 class="sec">亀裂測点 — 基準からの開口の変化</h3>
+    <div class="scroll-x"><table>
+      <tr><th>亀裂</th><th>向き</th><th class="num">開口（線に直交）</th><th class="num">ずれ（線に沿う）</th><th>判定 ${result.k}σ</th><th class="num">点数 側1 / 側2</th></tr>
+      ${trs.join('')}
+    </table></div>
+    <p class="note">正の開口は「開いた」、負は「閉じた」。ずれは縦線なら正＝右側が下がった、横線なら正＝上側が右へ動いた。
+      ± は標準誤差（両側の点の散らばり／√n と系統誤差の床${result.parallax?.ok && result.parallax.applied ? '、視差補正の誤差' : ''}の合成）。
+      ${gsd ? '経時シートで「この測点の観測として記録」すると、この値が今回の観測になります。' : 'スケールを決めると mm になり、経時管理に記録できます。'}</p>`;
+
+  // 図に線を重ねる（基準画像の座標＝図の座標）
+  const canvas = $('compareCanvas');
+  const ctx = canvas?.getContext('2d');
+  if (ctx && grayA) {
+    const scale = Math.min(1, 760 / grayA.width);
+    ctx.save();
+    ctx.strokeStyle = '#ff6b5e';
+    ctx.lineWidth = 2;
+    ctx.fillStyle = '#ff8a80';
+    ctx.font = 'bold 13px SFMono-Regular, Menlo, monospace';
+    for (const r of rows) {
+      const c = r.crack;
+      ctx.beginPath();
+      ctx.moveTo(c.x1 * scale, c.y1 * scale);
+      ctx.lineTo(c.x2 * scale, c.y2 * scale);
+      ctx.stroke();
+      ctx.fillText(c.label, c.x1 * scale + 5, c.y1 * scale - 5);
+    }
+    ctx.restore();
+  }
+
+  // 経時管理へ。スケールが無いと mm にならないので渡さない（px の記録は意味が混ざる）
+  const ok = rows.filter((r) => r.ok);
+  if (!gsd || !ok.length) return;
+  const framesNow = context.frames ?? getFrames();
+  const method = '亀裂測点（2時期 DIC）';
+  onMeasurement({
+    gsd,
+    frames: context.usedFrames,
+    method,
+    atExif: framesNow[0]?.exif?.dateTimeOriginal ?? null,
+    pairSigmaMM: median(ok.map((r) => r.sePx)) * gsd,
+    bulgeMM: null,
+    pairs: ok.map((r) => ({
+      label: r.crack.label, kind: 'crack', method,
+      meanPx: r.openingPx, meanMM: r.openingPx * gsd,
+      sigmaPx: r.sePx, sigmaMM: r.sePx * gsd,
+      shearMM: r.shearPx * gsd, sigmaShearMM: r.seShearPx * gsd,
+      n1: r.n1, n2: r.n2,
+    })),
+  });
 }
 
 /**

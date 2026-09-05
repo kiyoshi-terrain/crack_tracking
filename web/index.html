@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v28">
+<html lang="ja" data-version="v29">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -128,6 +128,17 @@
     position: absolute; border: 1.5px solid var(--amber);
     background: rgba(217,154,43,.08); pointer-events: none; display: none;
   }
+  /* 亀裂測点。線と、その両側のパッチ（変位の代表値を取る帯） */
+  #crackLayer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  #crackLayer .ck-line { stroke: #c9564e; stroke-width: 2; fill: none; }
+  #crackLayer .ck-patch { fill: rgba(201,86,78,.10); stroke: rgba(201,86,78,.55); stroke-width: 1; stroke-dasharray: 4 3; }
+  #crackLayer .ck-label { fill: #ff8a80; font: 700 13px SFMono-Regular, Menlo, monospace; paint-order: stroke; stroke: #000; stroke-width: 3px; }
+  #crackLayer .ck-draft { stroke: #d99a2b; stroke-width: 2; stroke-dasharray: 6 4; fill: none; }
+  #crackDrawToggle[data-on="1"] { border-color: #c9564e; color: #fff; background: rgba(201,86,78,.18); }
+  #crackList .ck-row { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  #crackList .ck-row .ck-sw { width: 14px; height: 3px; background: #c9564e; flex: none; }
+  #crackList .ck-row span { min-width: 0; flex: 1; }
+  #crackList .ck-row button { padding: 4px 10px; font-size: 12px; }
   /* 三分割線。画像の上にだけ引く。ビューファインダー全体に引くと
      画像の縁とずれて、構図の基準として使えなくなる */
   .vf-grid { position: absolute; inset: 0; pointer-events: none; opacity: .13; }
@@ -526,7 +537,7 @@
 
   <!-- ビューファインダー ───────────────────── -->
   <div class="vf" id="viewfinder">
-    <div id="preview"><div class="vf-grid"></div><div id="roiBox"></div></div>
+    <div id="preview"><div class="vf-grid"></div><div id="roiBox"></div><svg id="crackLayer" aria-hidden="true"></svg></div>
     <div class="vf-empty" id="vfEmpty">
       <div>
         <b>カメラが起動していません</b>
@@ -785,6 +796,18 @@
         <button id="roiFull">画像全体を使う</button>
       </div>
 
+      <h3 class="sec" style="margin-top:6px">亀裂測点</h3>
+      <p class="note" style="margin-top:0">
+        追いたい亀裂に沿って<b>線を引く</b>と、線の両側の変位の差 ＝ <b>開口</b>（線に直交）と<b>ずれ</b>（線に沿う）が
+        その亀裂の計測値になります。ターゲットを貼らずに特定の亀裂を経時管理に載せる経路です。
+        線は解析範囲の中に。<b>基準として保存</b>すると、次回の比較で同じ線が自動で使われます。
+      </p>
+      <div class="btn-row" style="margin-bottom:6px">
+        <button id="crackDrawToggle" data-on="0">亀裂を引く</button>
+        <button id="crackClear">全部消す</button>
+      </div>
+      <div id="crackList"></div>
+
       <div class="row" style="margin-top:14px">
         <div>
           <label>解析方式</label>
@@ -845,6 +868,7 @@
       <div id="quality"></div>
       <div id="frameTable" class="scroll-x"></div>
       <div id="targetResults"></div>
+      <div id="crackResults"></div>
 
       <h3 class="sec">残差ベクトル（カメラの動きを差し引いた残り）</h3>
       <canvas id="fieldCanvas"></canvas>
@@ -893,6 +917,7 @@
       <div id="compareStatus" style="margin-top:12px"></div>
       <canvas id="compareCanvas" class="hidden"></canvas>
       <p class="note" id="compareLegend"></p>
+      <div id="compareCracks"></div>
       <div id="compareStats"></div>
 
       <p class="note">
