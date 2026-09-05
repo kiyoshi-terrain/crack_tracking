@@ -61,14 +61,18 @@ Mac 上（および CI）で動かせるようにしています。
         │                          │
         │      ┌───────────────────┘
         ▼      ▼
+   AnalysisPlanner  目標幅 [px] → 縮小率・σ列・背景半径・解析範囲の上限
+        │
    CrackDetector ← SurfaceScale(intrinsics, plane)
         │
+        ├─ downsampled       検出用に縮小（幅広の開口を等倍で追うと数十秒かかる）
         ├─ darkTopHat        照明ムラ除去
         ├─ RidgeDetector     マルチスケール・ヘッセ行列
         ├─ RidgeThresholder  非極大抑制 + ヒステリシス
         ├─ Skeletonizer      Zhang-Suen 細線化
         ├─ PolylineTracer    枝分割・スパー除去・平滑化
-        └─ WidthEstimator    断面の半値幅 + PSF補正 + mm換算
+        ├─ toFullResolution  芯線を原寸へ戻す
+        └─ WidthEstimator    **原寸**の断面の半値幅 + PSF補正 + mm換算
         │
         ▼
    CrackMeasurement → CrackRecord → CSV / PDF
@@ -83,9 +87,17 @@ Mac 上（および CI）で動かせるようにしています。
 | `CameraIntrinsics` / `Plane` / `SurfaceScale` | **画像系カメラ座標**: X=右, Y=下, Z=前方（奥行きが正） |
 | `ARFrame.camera.transform` | **ARKit カメラ座標**: X=右, Y=上, Z=後方 |
 | ワールド位置の保存 | ARKit ワールド座標（重力基準） |
+| 計測枠（`reticleRegion`） | **画面**の正規化座標（0...1、ビューポート基準） |
+| 解析範囲（`analysisRegion(for:)`）・デプスの ROI | **画像**の正規化座標（0...1、キャプチャ画像基準） |
 
 変換は `DepthPlaneEstimator.worldPosition(ofCameraPoint:frame:)` の一箇所に集約してあります。
 ここを介さずに直接変換を書かないでください（Y/Z の符号を落として上下逆になります）。
+
+画面と画像の正規化座標も**別物**です。縦持ちではキャプチャ画像（横長）が 90° 回って
+左右を切られて表示されるので、画面中央の正方形は画像上では横長の矩形になります。
+`ARFrame.displayTransform(for:viewportSize:)` で写し、`ARCaptureController.analysisRegion(for:)`
+の一箇所で決めます。描く枠は解析範囲を画面へ戻したもの（`analysisRegionOnScreen`）で、
+「枠に入れたのに検出されない」を起こさないために設定上の枠ではなく実際の範囲を描きます。
 
 ### リッジ検出の極性の約束
 

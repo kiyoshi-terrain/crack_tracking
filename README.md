@@ -80,7 +80,18 @@ xcodegen generate
 open CrackScan.xcodeproj
 ```
 
-実機で動かすには `project.yml` の `DEVELOPMENT_TEAM` に自分の Team ID を設定してください。
+実機で動かすには署名の Team ID が要ります。`project.yml` は触らず、手元にだけ置く
+`Local.xcconfig` に書きます（`.gitignore` 済みなので `git pull` と衝突しません）。
+
+```bash
+cp Local.xcconfig.example Local.xcconfig
+# DEVELOPMENT_TEAM = 自分の Team ID に書き換える（Xcode → Settings → Accounts で確認）
+xcodegen generate
+```
+
+更新を取り込むときは `git pull && xcodegen generate` の 2 つだけです。
+Xcode の ▶（Debug）でも計測ロジック `CrackCore` は最適化ビルド（-O）になります。
+純 Swift の画像処理は最適化なしだと 10〜30 倍遅く、現場で「解析中…」が 1 分続くためです。
 
 ### 計測ロジックのテスト
 
@@ -131,14 +142,30 @@ swift test
 
 ## 使い方
 
-1. **案件を作る** — 案件名・構造物名・点検者と、**目標ひび割れ幅**を設定
-   （この幅が撮影ガイドのしきい値になります）
+1. **案件を作る** — 案件名・構造物名・点検者と、**目標ひび割れ幅**を設定。
+   目標幅は「測りたい幅の級」で、撮影ガイドのしきい値と、検出器が狙う幅
+   （この幅の 0.8〜4 倍）の両方を決めます。石積みの開口なら 1〜3 mm、
+   コンクリートのひび割れなら 0.2〜0.3 mm。案件画面で後から変えられます
 2. **部材名を入れて撮影開始** — 「橋脚 P3 west 面」など
 3. **枠を壁に向ける** — HUD の分解能が緑になるまで近づく
 4. **「計測」を押す** — 高解像度フレームを取り直して解析し、検出結果を重ねて表示
 5. **記録するひび割れを選ぶ** — チップをタップして選択を切り替え、「記録」
 6. **「記録」ボタンで写真も残す** — 3D モデル生成や再解析のための元データ
 7. **案件画面から CSV / PDF を書き出す**
+
+画面の枠は**実際に解析する範囲**です。枠を画像座標へ写し、解析できる画素数の上限で
+中心から縮めた結果を描いています。枠の外にある亀裂は検出しません。
+
+### 実機で確かめる（現地の前に）
+
+幅が分かっている線を測って、自分の端末で何 mm がいくらと出るかを一度見てください。
+
+- **[クラックゲージシート](https://kiyoshi-terrain.github.io/crack_tracking/gauge/)** —
+  0.3〜5.0 mm の線とくさびを A4 原寸で印刷する検証用シート（`web/gauge/`）。
+  平らな壁に貼り、0.3〜0.5 m から測ります。印刷の線は 0.03〜0.05 mm 太るので、
+  0.3 mm 未満は市販のクラックスケールで
+- 一貫して太く／細く出るなら `WidthEstimator.Options.psfSigmaPx` を
+  [docs/accuracy.md §8](docs/accuracy.md) の手順で校正します
 
 ---
 
@@ -148,6 +175,7 @@ swift test
 web/                   σ実測ツール（ブラウザ完結・端末非依存）
   index.html           → https://kiyoshi-terrain.github.io/crack_tracking/
   targets/             模擬き裂ターゲットシート（A4原寸印刷・検証用）
+  gauge/               クラックゲージシート（CrackScan の幅計測の検証用・A4原寸）
   manual/              取扱説明書（オフライン・印刷可）
   src/dic.js           デジタル画像相関（ZNCC + 逆合成Gauss-Newton）
   src/targets.js       円形ターゲットの検出と輝度加重重心

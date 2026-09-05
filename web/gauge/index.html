@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>クラックゲージシート — CrackScan 検証用（原寸印刷）</title>
+<style>
+  /* 製図の語彙で組む（targets/ と同じ）。用紙は白地に黒。赤は寸法の指示線に限る。 */
+  :root {
+    --ground: #f2f3f4;
+    --panel: #fbfbfb;
+    --ink: #16181d;
+    --ink-soft: #5c6270;
+    --rule: #d6d8dc;
+    --mark: #b03a2e;
+    --verify: #2f6f5e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a; --panel: #1b1e24; --ink: #e8eaee;
+      --ink-soft: #99a0ac; --rule: #2c313a;
+      --mark: #e2725c; --verify: #5cbfa4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a; --panel: #1b1e24; --ink: #e8eaee;
+    --ink-soft: #99a0ac; --rule: #2c313a;
+    --mark: #e2725c; --verify: #5cbfa4;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    line-height: 1.7;
+  }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap {
+    max-width: 1180px; margin: 0 auto; padding: 32px 24px 72px;
+    display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; gap: 28px; } }
+
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; }
+  .lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 24px; }
+  .eyebrow {
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 28px 0 10px; font-weight: 600;
+  }
+  .eyebrow:first-of-type { margin-top: 0; }
+  .callout {
+    border-left: 3px solid var(--mark); padding: 12px 14px; margin: 0 0 20px;
+    background: color-mix(in srgb, var(--mark) 7%, transparent);
+    font-size: 14px;
+  }
+  .callout strong { color: var(--mark); }
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step; position: relative;
+    padding: 0 0 14px 34px; font-size: 14px;
+  }
+  ol.steps li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute; left: 0; top: 1px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--mark); font-weight: 600;
+  }
+  ol.steps li em { font-style: normal; color: var(--verify); font-weight: 600; }
+  table.spec { border-collapse: collapse; font-size: 13.5px; width: 100%; }
+  table.spec th, table.spec td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--rule); }
+  table.spec th { color: var(--ink-soft); font-weight: 600; }
+  table.spec td.mono { text-align: right; }
+  p.note { font-size: 13px; color: var(--ink-soft); margin: 8px 0 0; }
+
+  button.print {
+    appearance: none; border: 1px solid var(--ink); background: var(--ink); color: var(--ground);
+    font: inherit; font-size: 14px; font-weight: 600; padding: 11px 22px; border-radius: 4px;
+    cursor: pointer; margin-bottom: 18px;
+  }
+  button.print:hover { opacity: .88; }
+  button.print:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+
+  .sheet-frame {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 14px; overflow-x: auto; min-width: 0;
+  }
+  /* 用紙は常に白地に黒。テーマで反転させない（計測対象なので） */
+  .sheet {
+    width: 210mm; height: 297mm; background: #fff; display: block;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  .sheet-frame .scaler { transform-origin: top left; }
+  a { color: var(--mark); }
+
+  @media print {
+    @page { size: A4 portrait; margin: 0; }
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .wrap { display: block; max-width: none; margin: 0; padding: 0; }
+    .sheet-frame { border: 0; padding: 0; background: #fff; overflow: visible; }
+    .sheet-frame .scaler { transform: none !important; }
+    .sheet { box-shadow: none; width: 210mm; height: 297mm; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="no-print">
+    <h1>クラックゲージシート</h1>
+    <p class="lede">
+      CrackScan（iOS）の幅計測を、<strong>幅が分かっている線</strong>で机上検証するための原寸シートです。
+      現地で初めて使う前に、自分の端末で「何 mm の線が何 mm と出るか」を一度確かめてください。
+    </p>
+
+    <button class="print" onclick="window.print()">印刷する</button>
+
+    <div class="callout">
+      <strong>必ず原寸（100%）で印刷してください。</strong>
+      プリンタの既定は「用紙に合わせる」で約 96% に縮みます。印刷後、上部のスケールバーを
+      定規で測って <span class="mono">100.0mm</span> であることを確認してください。
+    </div>
+
+    <p class="eyebrow">手順</p>
+    <ol class="steps">
+      <li>印刷して、<em>平らな壁</em>にテープで貼る。LiDAR は壁を平面として取るので、机に置くより壁に貼る方が現地に近い。</li>
+      <li>CrackScan で案件を作り、<em>目標幅を測りたい線の級</em>に合わせる。検出はその幅の 0.8〜4 倍を狙うので、
+        0.3 mm なら 0.3〜1.0 の線、1 mm なら 0.8〜3 の線、3 mm なら 3〜5 の線が対象になる。</li>
+      <li>0.3〜0.5 m まで寄り、HUD の分解能が緑になったら線を<em>タップ</em>（1 本だけ測る）か「計測」（枠内を全部）。</li>
+      <li>チップの値と下の表を比べる。0.3 m・48MP なら <em>±0.05 mm</em> 程度に収まるのが目安。</li>
+      <li>くさび（幅が連続して変わる線）を測り、詳細画面の「幅の分布」が片側へ滑らかに増えることを見る。</li>
+      <li>一貫して太く（細く）出るなら、<code>WidthEstimator.Options.psfSigmaPx</code>（既定 0.8）を
+        <a href="https://github.com/kiyoshi-terrain/crack_tracking/blob/main/docs/accuracy.md">docs/accuracy.md §8</a> の手順で校正する。</li>
+    </ol>
+
+    <p class="eyebrow">線の幅</p>
+    <table class="spec">
+      <tr><th>段</th><th>幅</th><th>期待される用途</th></tr>
+      <tr><td>上段</td><td class="mono">0.3 / 0.5 / 0.8 / 1.0 / 1.5 mm</td><td>コンクリートのひび割れ級（目標幅 0.3〜0.5）</td></tr>
+      <tr><td>下段</td><td class="mono">2.0 / 3.0 / 5.0 mm</td><td>石積みの開口級（目標幅 1〜3）</td></tr>
+      <tr><td>くさび</td><td class="mono">0.2 → 2.0 mm（100 mm）</td><td>幅の分布・分解能の限界を見る</td></tr>
+    </table>
+
+    <p class="eyebrow">プリンタの限界</p>
+    <p class="note">
+      レーザープリンタ 600 dpi の点は 0.042 mm。トナーのにじみで線は設計より <span class="mono">0.03〜0.05 mm</span> 太ることが多い。
+      <strong>0.3 mm 未満の線は印刷では当てにならない</strong>ので、0.1 / 0.2 mm 級の検証には市販のクラックスケール
+      （透明板に線幅が印刷されたもの）を使ってください。0.5 mm 以上なら ±10% 以内で使えます。
+      印刷した線をルーペ付きのクラックスケールで一度読んでおくと、そのシートの実幅が分かります。
+    </p>
+    <p class="note">
+      白い紙は大谷石より明るく、コントラストも一様です。ここで合っても現地でそのまま合う保証はなく、
+      現地では手持ちのクラックスケールでも 1 か所読んで突き合わせてください。
+    </p>
+  </div>
+
+  <div class="sheet-frame">
+    <div class="scaler" id="scaler">
+      <svg class="sheet" viewBox="0 0 210 297" xmlns="http://www.w3.org/2000/svg">
+        <rect width="210" height="297" fill="#fff"/>
+
+        <text x="105" y="15" font-family="sans-serif" font-size="5" font-weight="bold"
+              text-anchor="middle" fill="#000">クラックゲージシート</text>
+        <text x="105" y="21.5" font-family="sans-serif" font-size="3"
+              text-anchor="middle" fill="#444">A4 原寸印刷／CrackScan 検証用／線幅は設計値（印刷で 0.03〜0.05mm 太る）</text>
+
+        <!-- 印刷倍率の検証 -->
+        <g stroke="#000" stroke-width="0.4">
+          <line x1="55" y1="32" x2="155" y2="32"/>
+          <line x1="55" y1="29" x2="55" y2="35"/>
+          <line x1="155" y1="29" x2="155" y2="35"/>
+          <line x1="65" y1="30.5" x2="65" y2="33.5"/>
+          <line x1="75" y1="30.5" x2="75" y2="33.5"/>
+          <line x1="85" y1="30.5" x2="85" y2="33.5"/>
+          <line x1="95" y1="30.5" x2="95" y2="33.5"/>
+          <line x1="105" y1="30" x2="105" y2="34"/>
+          <line x1="115" y1="30.5" x2="115" y2="33.5"/>
+          <line x1="125" y1="30.5" x2="125" y2="33.5"/>
+          <line x1="135" y1="30.5" x2="135" y2="33.5"/>
+          <line x1="145" y1="30.5" x2="145" y2="33.5"/>
+        </g>
+        <text x="105" y="39.5" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#000">この線が 100.0mm なら印刷倍率OK（10mm刻み）。CrackScan の「延長」の検証にも使える</text>
+
+        <!-- 上段: 0.3 / 0.5 / 0.8 / 1.0 / 1.5 mm（線の中心は x = 30, 67.5, 105, 142.5, 180） -->
+        <text x="105" y="52" font-family="sans-serif" font-size="3.2" font-weight="bold"
+              text-anchor="middle" fill="#000">上段 ─ コンクリートのひび割れ級（目標幅 0.3〜0.5mm で検出）</text>
+        <g fill="#000">
+          <rect x="29.85"  y="60" width="0.3" height="60"/>
+          <rect x="67.25"  y="60" width="0.5" height="60"/>
+          <rect x="104.6"  y="60" width="0.8" height="60"/>
+          <rect x="142"    y="60" width="1.0" height="60"/>
+          <rect x="179.25" y="60" width="1.5" height="60"/>
+        </g>
+        <g font-family="sans-serif" font-size="3.4" text-anchor="middle" fill="#000">
+          <text x="30"    y="128">0.3</text>
+          <text x="67.5"  y="128">0.5</text>
+          <text x="105"   y="128">0.8</text>
+          <text x="142.5" y="128">1.0</text>
+          <text x="180"   y="128">1.5</text>
+        </g>
+        <text x="105" y="133.5" font-family="sans-serif" font-size="2.6" text-anchor="middle" fill="#666">単位 mm（設計幅）・線長 60mm</text>
+
+        <!-- 下段: 2.0 / 3.0 / 5.0 mm（線の中心は x = 45, 105, 165） -->
+        <text x="105" y="147" font-family="sans-serif" font-size="3.2" font-weight="bold"
+              text-anchor="middle" fill="#000">下段 ─ 石積みの開口級（目標幅 1〜3mm で検出）</text>
+        <g fill="#000">
+          <rect x="44"    y="155" width="2.0" height="60"/>
+          <rect x="103.5" y="155" width="3.0" height="60"/>
+          <rect x="162.5" y="155" width="5.0" height="60"/>
+        </g>
+        <g font-family="sans-serif" font-size="3.4" text-anchor="middle" fill="#000">
+          <text x="45"  y="223">2.0</text>
+          <text x="105" y="223">3.0</text>
+          <text x="165" y="223">5.0</text>
+        </g>
+
+        <!-- くさび: 幅 0.2 → 2.0 mm を 100mm で -->
+        <text x="105" y="238" font-family="sans-serif" font-size="3.2" font-weight="bold"
+              text-anchor="middle" fill="#000">くさび ─ 幅 0.2mm（左）→ 2.0mm（右）を 100mm で連続変化</text>
+        <polygon points="55,251.9 155,251 155,253 55,252.1" fill="#000"/>
+        <g font-family="sans-serif" font-size="2.9" fill="#000">
+          <text x="55"  y="259" text-anchor="middle">0.2</text>
+          <text x="80"  y="259" text-anchor="middle">0.65</text>
+          <text x="105" y="259" text-anchor="middle">1.1</text>
+          <text x="130" y="259" text-anchor="middle">1.55</text>
+          <text x="155" y="259" text-anchor="middle">2.0</text>
+        </g>
+        <g stroke="#999" stroke-width="0.2">
+          <line x1="80"  y1="254.5" x2="80"  y2="256"/>
+          <line x1="105" y1="254.5" x2="105" y2="256"/>
+          <line x1="130" y1="254.5" x2="130" y2="256"/>
+        </g>
+
+        <text x="105" y="272" font-family="sans-serif" font-size="3.0"
+              text-anchor="middle" fill="#000">平らな壁に貼り、0.3〜0.5m から。案件の目標幅を線の級に合わせる（0.8〜4倍を検出）</text>
+        <text x="105" y="277.5" font-family="sans-serif" font-size="2.7"
+              text-anchor="middle" fill="#666">0.3mm 未満は印刷精度の外。0.1 / 0.2mm 級は市販のクラックスケールで。</text>
+
+        <!-- 四隅の見当 -->
+        <g stroke="#000" stroke-width="0.3" fill="none">
+          <path d="M8 8 h6 M8 8 v6"/><path d="M202 8 h-6 M202 8 v6"/>
+          <path d="M8 289 h6 M8 289 v-6"/><path d="M202 289 h-6 M202 289 v-6"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 画面では用紙全体が収まるように縮小表示する。印刷時は CSS が transform を外して原寸に戻す。
+  function fitSheet() {
+    const frame = document.querySelector('.sheet-frame');
+    const scaler = document.getElementById('scaler');
+    const sheet = scaler.querySelector('.sheet');
+    scaler.style.transform = 'none';
+    const available = frame.clientWidth - 28;
+    const natural = sheet.getBoundingClientRect();
+    if (!natural.width) return;
+    const factor = Math.min(1, available / natural.width);
+    scaler.style.transform = `scale(${factor})`;
+    // 高さは変形前の寸法から出す（変形後の矩形に factor を掛けると二重に縮んで下が切れる）
+    scaler.style.height = `${natural.height * factor}px`;
+  }
+  window.addEventListener('resize', fitSheet);
+  window.addEventListener('load', fitSheet);
+  fitSheet();
+</script>
+</body>
+</html>

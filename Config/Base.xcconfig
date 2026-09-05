@@ -1,0 +1,9 @@
+// 全ターゲット共通のビルド設定（git 管理）。
+//
+// 人ごとに違う値（署名の Team ID など）はリポジトリ直下の Local.xcconfig に書く。
+// Local.xcconfig は .gitignore 済みで、無ければこの行は黙って読み飛ばされる（#include? の ?）。
+// 参照するファイルが無いと Xcode は「Unable to open base configuration reference file」で
+// ビルドを止めるので、project.yml からは必ずこの（存在する）ファイルを指す。
+//
+//   cp Local.xcconfig.example Local.xcconfig   → DEVELOPMENT_TEAM を自分の Team ID に
+#include? "../Local.xcconfig"

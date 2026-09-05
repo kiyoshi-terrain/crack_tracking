@@ -19,6 +19,9 @@ struct CaptureView: View {
 
     @State private var session = CaptureSession()
 
+    /// 画面上の指の大きさ（pt）。タップ位置から芯線を探す半径をこれから画像 px に換算する
+    private let tapToleranceInPoints: CGFloat = 28
+
     var body: some View {
         ZStack {
             ARViewContainer(session: controller.session)
@@ -45,6 +48,9 @@ struct CaptureView: View {
                         onTap: { measurer.toggle($0) }
                     )
                 }
+                // 枠を画像座標へ写すのに画面の大きさが要る（画面と画像の正規化座標は別物）
+                .onAppear { controller.viewportSize = geometry.size }
+                .onChange(of: geometry.size) { _, size in controller.viewportSize = size }
             }
             .ignoresSafeArea()
 
@@ -55,7 +61,8 @@ struct CaptureView: View {
                     trackingMessage: controller.trackingStateMessage,
                     frameCount: controller.capturedFrames.count,
                     coverageRatio: controller.coverageRatio,
-                    targetWidthMM: project.targetCrackWidthMM
+                    targetWidthMM: project.targetCrackWidthMM,
+                    captureResolution: controller.captureResolution
                 )
                 Spacer()
                 if measurer.hasResults {
@@ -87,8 +94,9 @@ struct CaptureView: View {
 
     // MARK: - パーツ
 
+    /// 計測枠。**実際に解析する範囲**を描く（設定上の枠ではなく）。
     private func reticle(in size: CGSize) -> some View {
-        let region = controller.reticleRegion()
+        let region = controller.analysisRegionOnScreen ?? controller.reticleRegion()
         let rect = CGRect(
             x: region.minX * size.width,
             y: region.minY * size.height,
@@ -119,6 +127,12 @@ struct CaptureView: View {
                 Spacer()
                 Button("クリア") { measurer.clear() }
                     .font(.footnote)
+            }
+            if let notice = measurer.notice {
+                Label(notice, systemImage: "info.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -216,35 +230,61 @@ struct CaptureView: View {
 
     private func runMeasurement() async {
         measurer.clear()
-        guard let frame = await controller.highResolutionFrame() else {
-            measurer.errorMessage = "フレームを取得できませんでした"
+        guard let capture = await controller.measurementFrame() else {
+            measurer.errorMessage = "フレームを取得できませんでした。カメラが動いているか確認してください"
             return
         }
         await measurer.measure(
-            frame: frame,
-            normalizedRegion: controller.reticleRegion(),
-            targetCrackWidthMM: project.targetCrackWidthMM
+            frame: capture.frame,
+            normalizedRegion: controller.analysisRegion(for: capture.frame),
+            targetCrackWidthMM: project.targetCrackWidthMM,
+            fallbackEstimate: controller.recentEstimate
         )
+        if !capture.isHighResolution, measurer.hasResults {
+            measurer.notice = [measurer.notice, "高解像度フレームが取れず、ライブ映像で計測しました（分解能が粗い）"]
+                .compactMap { $0 }.joined(separator: "／")
+        }
     }
 
     /// 画面をタップした位置のひび割れ1本だけを計測する。
     private func measureTapped(at location: CGPoint, viewport: CGSize) async {
-        guard let frame = await controller.highResolutionFrame() else {
-            measurer.errorMessage = "フレームを取得できませんでした"
+        guard let capture = await controller.measurementFrame() else {
+            measurer.errorMessage = "フレームを取得できませんでした。カメラが動いているか確認してください"
             return
         }
+        let frame = capture.frame
+        let imageSize = frame.capturedImageSize
+        let orientation = ARDisplayMapping.currentOrientation
         let imagePoint = ARDisplayMapping.imagePoint(
             screenPoint: location,
-            imageSize: frame.camera.imageResolution,
+            imageSize: imageSize,
             frame: frame,
-            orientation: ARDisplayMapping.currentOrientation,
+            orientation: orientation,
             viewport: viewport
         )
+        // 指の大きさ（pt）を画像の px に換算する。48MP では 28pt が 300px 級になる。
+        // 固定 24px だと画面の 0.3% しかなく、ほぼ必ず「見つかりません」になる
+        let offsetPoint = ARDisplayMapping.imagePoint(
+            screenPoint: CGPoint(x: location.x + tapToleranceInPoints, y: location.y),
+            imageSize: imageSize,
+            frame: frame,
+            orientation: orientation,
+            viewport: viewport
+        )
+        let searchRadiusPx = max(24, Int(imagePoint.distance(to: offsetPoint).rounded()))
+
         await measurer.measureOne(
             frame: frame,
-            normalizedRegion: controller.reticleRegion(),
-            imagePoint: imagePoint
+            normalizedRegion: controller.analysisRegion(for: frame),
+            imagePoint: imagePoint,
+            searchRadiusPx: searchRadiusPx,
+            targetCrackWidthMM: project.targetCrackWidthMM,
+            fallbackEstimate: controller.recentEstimate
         )
+        if !capture.isHighResolution, measurer.hasResults {
+            measurer.notice = [measurer.notice, "高解像度フレームが取れず、ライブ映像で計測しました（分解能が粗い）"]
+                .compactMap { $0 }.joined(separator: "／")
+        }
     }
 
     private func saveSelectedCracks() {

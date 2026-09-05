@@ -1,4 +1,5 @@
 ## Xcode / XcodeGen
+Local.xcconfig
 *.xcodeproj/
 *.xcworkspace/
 !*.xcodeproj/project.pbxproj
