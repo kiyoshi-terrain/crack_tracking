@@ -5,7 +5,8 @@
 // test/parallax-e2e.mjs（時間がかかるので通常の検証には入れない）。
 
 import { cellGeometry, estimateBaselineShift, correctParallax, leverageQuality } from '../src/parallax.js';
-import { sampleOutOfPlane } from '../src/pointcloud.js';
+import { sampleOutOfPlane, fitWallPlane, placeViewpoint } from '../src/pointcloud.js';
+import { cameraFromPlane, pixelScale } from '../src/surface.js';
 import { fitAffine, residuals } from '../src/transform.js';
 
 const F = 700, W = 440, H = 330, D = 5000;
@@ -188,6 +189,44 @@ export function runParallaxTests(check, near) {
     check('点群の無いセルは触らない',
       fixed.ok && kept.every((v, i) => v === after[i])
       && cells.filter((c, i) => !partial[i]).every((c) => c.parallaxCorrected === false));
+  }
+
+  // 近づいてスキャンし、離れて撮る（LiDAR は 3m しか届かない）
+  {
+    // カメラ座標で壁は z=5000。スキャンは 1m の位置から始めたので、
+    // 点群の原点は z=4000 にある（点群座標 = カメラ座標 − (0,0,4000)）
+    const pts = [];
+    for (let y = -1200; y <= 1200; y += 40) for (let x = -1600; x <= 1600; x += 40) pts.push(x, y, 1000);
+    const cloud = Float64Array.from(pts);
+    const plane = fitWallPlane(cloud, { viewpoint: [0, 0, 0] });
+    const centroid = [0, 0, 1000];
+    const truth = D / F;
+
+    const bad = pixelScale(
+      cameraFromPlane(plane, centroid, { worldUp: [0, -1, 0] }), plane, INTR, W / 2, H / 2, 1
+    );
+    check('スキャン原点のままだと mm/px が桁で狂う', bad.mmPerPx < truth * 0.3,
+      `${bad.mmPerPx.toFixed(2)} mm/px（真値 ${truth.toFixed(2)}）距離 ${(bad.distanceMM / 1000).toFixed(2)}m`);
+
+    const fixed = placeViewpoint(plane, centroid, D);
+    check('撮影距離を入れると視点が面から その距離になる',
+      near(fixed.viewpointDistance, D, 1e-6) && fixed.viewpointSource === 'manual');
+    const good = pixelScale(
+      cameraFromPlane(fixed, centroid, { worldUp: [0, -1, 0] }), fixed, INTR, W / 2, H / 2, 1
+    );
+    check('撮影距離を入れると mm/px が戻る', near(good.mmPerPx, truth, truth * 0.01),
+      `${good.mmPerPx.toFixed(2)} mm/px（真値 ${truth.toFixed(2)}）`);
+  }
+
+  // 位置合わせが取れていないときは「効いた」と言わない
+  {
+    const T = { x: 200, y: 0, z: 0 };
+    const cells = cellsFrom(base, trueField(geo, T));
+    // 高さマップが写真とずれている状況（撮影距離の入れ忘れで倍率が違う）
+    const misregistered = geoFor(base, (p) => roughHeight([p[0] * 5, p[1] * 5, p[2]]));
+    const fixed = correctParallax(cells, misregistered, {});
+    check('視差が減っていなければ ineffective を立てる', fixed.ok && fixed.ineffective,
+      fixed.ok ? `減少 ${(fixed.reduction * 100).toFixed(0)}%` : fixed.reason);
   }
 
   // 面外マップの読み出し
