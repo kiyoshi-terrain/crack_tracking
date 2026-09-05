@@ -11,6 +11,8 @@ struct ProjectDetailView: View {
     @State private var isAskingMemberName = false
     @State private var exportItem: ExportItem?
     @State private var modelGeneration: ModelGenerationState?
+    @State private var isConfirmingDeleteAll = false
+    @State private var sessionToDelete: CaptureSession?
 
     init(project: InspectionProject) {
         _project = State(initialValue: project)
@@ -52,6 +54,33 @@ struct ProjectDetailView: View {
         .onChange(of: project) { _, newValue in
             store.save(newValue)
         }
+        .confirmationDialog(
+            "計測結果をすべて削除しますか？",
+            isPresented: $isConfirmingDeleteAll,
+            titleVisibility: .visible
+        ) {
+            Button("\(project.allCracks.count) 本を削除", role: .destructive) { deleteAllCracks() }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("撮影セッションと保存した写真は残ります。写真も消すにはセッションを削除してください")
+        }
+        .confirmationDialog(
+            "撮影セッションを削除しますか？",
+            isPresented: Binding(
+                get: { sessionToDelete != nil },
+                set: { if !$0 { sessionToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let session = sessionToDelete {
+                Button("写真 \(session.frameCount) 枚と計測 \(session.cracks.count) 本を削除", role: .destructive) {
+                    deleteSession(session)
+                }
+            }
+            Button("キャンセル", role: .cancel) { sessionToDelete = nil }
+        } message: {
+            Text("保存した写真・深度・3D モデルもフォルダごと消えます。元に戻せません")
+        }
     }
 
     // MARK: - セクション
@@ -88,13 +117,13 @@ struct ProjectDetailView: View {
     }
 
     private var cracksSection: some View {
-        Section("計測結果") {
+        Section {
             if project.allCracks.isEmpty {
                 Text("まだ計測がありません")
                     .foregroundStyle(.secondary)
             }
             ForEach(Array(project.sessions.enumerated()), id: \.element.id) { sessionIndex, session in
-                ForEach(Array(session.cracks.enumerated()), id: \.element.id) { crackIndex, _ in
+                ForEach(Array(session.cracks.enumerated()), id: \.element.id) { crackIndex, crack in
                     NavigationLink {
                         CrackDetailView(
                             crack: $project.sessions[sessionIndex].cracks[crackIndex],
@@ -103,9 +132,55 @@ struct ProjectDetailView: View {
                     } label: {
                         CrackRow(crack: session.cracks[crackIndex], thresholds: project.gradeThresholds)
                     }
+                    // 試し測りや失敗を消せないと、一覧が汚れて本番の値が埋もれる
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            deleteCrack(id: crack.id, inSession: session.id)
+                        } label: {
+                            Label("削除", systemImage: "trash")
+                        }
+                    }
                 }
             }
+        } header: {
+            HStack {
+                Text("計測結果")
+                Spacer()
+                if !project.allCracks.isEmpty {
+                    Button(role: .destructive) {
+                        isConfirmingDeleteAll = true
+                    } label: {
+                        Label("すべて削除", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+        } footer: {
+            if !project.allCracks.isEmpty {
+                Text("左にスワイプで 1 本ずつ削除できます")
+            }
         }
+    }
+
+    // MARK: - 削除
+
+    private func deleteCrack(id: UUID, inSession sessionID: UUID) {
+        guard let sessionIndex = project.sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        project.sessions[sessionIndex].cracks.removeAll { $0.id == id }
+    }
+
+    private func deleteAllCracks() {
+        for index in project.sessions.indices {
+            project.sessions[index].cracks = []
+        }
+    }
+
+    /// セッションを写真・深度・モデルのフォルダごと消す。
+    private func deleteSession(_ session: CaptureSession) {
+        store.deleteSessionFiles(session, in: project)
+        project.sessions.removeAll { $0.id == session.id }
+        sessionToDelete = nil
     }
 
     private var sessionsSection: some View {
@@ -116,11 +191,17 @@ struct ProjectDetailView: View {
             }
             ForEach(project.sessions) { session in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(session.memberName.isEmpty ? "（部材名なし）" : session.memberName)
-                        .font(.subheadline)
+                    HStack {
+                        Text(session.memberName.isEmpty ? "（部材名なし）" : session.memberName)
+                            .font(.subheadline)
+                        Spacer()
+                        Text(session.startedAt, style: .date)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     HStack(spacing: 12) {
                         Text("\(session.frameCount) 枚")
-                        Text("カバー率 \(Int(session.coverageRatio * 100))%")
+                        Text("計測 \(session.cracks.count) 本")
                         if session.modelRelativePath != nil {
                             Label("3Dモデル", systemImage: "cube")
                         }
@@ -129,6 +210,13 @@ struct ProjectDetailView: View {
                     .foregroundStyle(.secondary)
 
                     modelButton(for: session)
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        sessionToDelete = session
+                    } label: {
+                        Label("削除", systemImage: "trash")
+                    }
                 }
             }
         }
