@@ -12,6 +12,8 @@ struct CaptureHUD: View {
     let frameCount: Int
     let coverageRatio: Double
     let targetWidthMM: Double
+    /// 高解像度フレームの画素数が分かっているか。分かる前の分解能はライブ映像の値で、実力より悪く出る
+    var captureResolution: CGSize? = nil
 
     var body: some View {
         VStack(spacing: 8) {
@@ -36,7 +38,7 @@ struct CaptureHUD: View {
     private var metrics: some View {
         HStack(spacing: 0) {
             metric(
-                title: "分解能",
+                title: captureResolution == nil ? "分解能（仮）" : "分解能",
                 value: conditions.map { String(format: "%.3f", $0.millimetersPerPixel) } ?? "—",
                 unit: "mm/px",
                 highlight: true,

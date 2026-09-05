@@ -144,15 +144,35 @@ public struct CaptureQualityEvaluator: Sendable {
         let meetsResolution = c.millimetersPerPixel <= requiredGSD
         if !meetsResolution {
             let needed = c.distance * requiredGSD / max(c.millimetersPerPixel, 1e-6)
-            issues.append(.init(
-                id: "resolution",
-                level: .warning,
-                message: String(
-                    format: "分解能不足（%.2f mm/px）。%.1fm 以内まで近づいてください",
-                    c.millimetersPerPixel,
-                    needed
-                )
-            ))
+            if needed < thresholds.minDistance {
+                // 「0.1m まで近づけ」と言いながら 0.25m 未満を自分でブロックしていた。
+                // 最短距離より近くへは行けないので、その距離で得られる分解能から
+                // この端末で測れる最小の幅を逆算し、目標幅の方を直してもらう。
+                // 実機（iPhone 16 Pro Max・0.26m・0.19mm/px）で実際に矛盾した助言が出た
+                let gsdAtMinDistance = c.millimetersPerPixel * thresholds.minDistance / max(c.distance, 1e-6)
+                let measurableMM = gsdAtMinDistance * CaptureAdvisor.defaultMinimumPixelsAcrossCrack
+                issues.append(.init(
+                    id: "resolution",
+                    level: .warning,
+                    message: String(
+                        format: "分解能不足（%.2f mm/px）。目標幅 %.2f mm は最短の %.2fm まで寄っても足りません。目標幅を %.1f mm 以上にするか、参考値として扱ってください",
+                        c.millimetersPerPixel,
+                        thresholds.targetCrackWidthMM,
+                        thresholds.minDistance,
+                        (measurableMM * 10).rounded(.up) / 10
+                    )
+                ))
+            } else {
+                issues.append(.init(
+                    id: "resolution",
+                    level: .warning,
+                    message: String(
+                        format: "分解能不足（%.2f mm/px）。%.1fm 以内まで近づいてください",
+                        c.millimetersPerPixel,
+                        needed
+                    )
+                ))
+            }
         }
 
         if c.distance < thresholds.minDistance {

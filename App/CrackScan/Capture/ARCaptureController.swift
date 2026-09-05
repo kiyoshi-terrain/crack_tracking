@@ -35,6 +35,15 @@ final class ARCaptureController: NSObject, ObservableObject {
     /// 計測レティクル（画面中央の枠）の正規化サイズ
     @Published var reticleSize: CGFloat = 0.5
 
+    /// 高解像度フレームの画素数。HUD の分解能はこれで計算する。
+    ///
+    /// ライブ映像（1920px 級）の内部パラメータで mm/px を出すと、実際に計測する
+    /// 高解像度フレーム（4032px 以上）より 2 倍ほど悪い値が出て、「0.1m まで近づけ」
+    /// のような実現不能な助言になる（実機で発生）。セッション開始後に 1 枚だけ
+    /// 高解像度フレームを取って画素数を覚え、以後は内部パラメータをその寸法へ拡縮する。
+    @Published private(set) var captureResolution: CGSize?
+    private var isProbingCaptureResolution = false
+
     let session = ARSession()
 
     var evaluator = CaptureQualityEvaluator()
@@ -63,6 +72,8 @@ final class ARCaptureController: NSObject, ObservableObject {
         capturedFrames = []
         coverage = CoverageTracker(areaWidth: 4.0, areaHeight: 3.0, cellSize: 0.1)
         coverageRatio = 0
+        captureResolution = nil
+        isProbingCaptureResolution = false
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
@@ -200,18 +211,39 @@ final class ARCaptureController: NSObject, ObservableObject {
             verdict = nil
             return
         }
+        probeCaptureResolutionIfNeeded(frame: frame)
         guard let c = makeConditions(frame: frame, estimate: estimate) else { return }
         conditions = c
         verdict = evaluator.evaluate(c)
+    }
+
+    /// 高解像度フレームの画素数を 1 回だけ調べる（保存はしない）。
+    private func probeCaptureResolutionIfNeeded(frame: ARFrame) {
+        guard captureResolution == nil, !isProbingCaptureResolution else { return }
+        guard case .normal = frame.camera.trackingState else { return }
+        isProbingCaptureResolution = true
+        session.captureHighResolutionFrame { [weak self] hiRes, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isProbingCaptureResolution = false
+                if let hiRes { self.captureResolution = hiRes.camera.imageResolution }
+            }
+        }
     }
 
     private func makeConditions(
         frame: ARFrame,
         estimate: DepthPlaneEstimator.Estimate
     ) -> CaptureConditions? {
+        // ライブ映像の内部パラメータ。ピント・露出の評価（ライブ画像を切り出す）はこちら
         let intrinsics = DepthPlaneEstimator.cameraIntrinsics(frame: frame)
-        let scale = SurfaceScale(intrinsics: intrinsics, plane: estimate.plane)
-        let center = Vec2(Double(intrinsics.imageWidth) / 2, Double(intrinsics.imageHeight) / 2)
+        // 分解能・入射角は、実際に計測する高解像度フレームの寸法で出す。
+        // 画素数が分かるまで（開始直後の 1 秒ほど）はライブ映像の値で、HUD には「仮」と出る
+        let scaleIntrinsics = captureResolution.map {
+            intrinsics.scaled(toWidth: Int($0.width), height: Int($0.height))
+        } ?? intrinsics
+        let scale = SurfaceScale(intrinsics: scaleIntrinsics, plane: estimate.plane)
+        let center = Vec2(Double(scaleIntrinsics.imageWidth) / 2, Double(scaleIntrinsics.imageHeight) / 2)
 
         guard let mmPerPx = scale.nominalMillimetersPerPixel(at: center),
               let angle = scale.incidenceAngleDegrees(at: center) else { return nil }

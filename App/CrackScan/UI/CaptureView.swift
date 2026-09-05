@@ -55,7 +55,8 @@ struct CaptureView: View {
                     trackingMessage: controller.trackingStateMessage,
                     frameCount: controller.capturedFrames.count,
                     coverageRatio: controller.coverageRatio,
-                    targetWidthMM: project.targetCrackWidthMM
+                    targetWidthMM: project.targetCrackWidthMM,
+                    captureResolution: controller.captureResolution
                 )
                 Spacer()
                 if measurer.hasResults {

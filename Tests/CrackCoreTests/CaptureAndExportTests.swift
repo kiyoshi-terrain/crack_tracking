@@ -33,6 +33,34 @@ final class CaptureAndExportTests: XCTestCase {
         XCTAssertTrue(verdict.issues.contains { $0.id == "resolution" })
     }
 
+    func testImpossibleResolutionAdviceDoesNotAskToGoBelowMinimumDistance() {
+        // 実機（iPhone 16 Pro Max）で出た値。0.26m・0.19mm/px で目標 0.2mm を 3px で撮るには
+        // 0.09m まで寄る計算になるが、最短距離 0.25m より近い。
+        // 「近づいてください」と「近すぎます」を同時に言ってはいけない
+        var c = goodConditions()
+        c.distance = 0.26
+        c.millimetersPerPixel = 0.19
+        let verdict = CaptureQualityEvaluator().evaluate(c)
+        let issue = verdict.issues.first { $0.id == "resolution" }
+        XCTAssertNotNil(issue)
+        XCTAssertFalse(issue?.message.contains("近づいて") ?? true, issue?.message ?? "")
+        XCTAssertTrue(issue?.message.contains("目標幅") ?? false, issue?.message ?? "")
+        // 最短 0.25m での分解能 0.183mm/px × 3px = 0.55mm → 0.6mm 以上と言う
+        XCTAssertTrue(issue?.message.contains("0.6 mm") ?? false, issue?.message ?? "")
+        XCTAssertEqual(verdict.level, .warning)
+        XCTAssertTrue(verdict.canCapture)
+    }
+
+    func testReachableResolutionAdviceStillSaysHowClose() {
+        // 0.5m・0.10mm/px で目標 0.2mm → 0.33m まで寄れば足りる。最短 0.25m より遠いので「近づけ」でよい
+        var c = goodConditions()
+        c.distance = 0.5
+        c.millimetersPerPixel = 0.10
+        let verdict = CaptureQualityEvaluator().evaluate(c)
+        let issue = verdict.issues.first { $0.id == "resolution" }
+        XCTAssertTrue(issue?.message.contains("0.3m 以内") ?? false, issue?.message ?? "")
+    }
+
     func testSteepAngleBlocks() {
         var c = goodConditions()
         c.incidenceAngleDegrees = 55
