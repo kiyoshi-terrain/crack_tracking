@@ -35,7 +35,8 @@
 │               CrackDetector, AnalysisPlanner,        │
 │               StrokePath（なぞった線の近傍と区間）      │
 │  Measurement  WidthEstimator, PointSpreadCorrection, │
-│               CandidateFilter                        │
+│               CandidateFilter, ScaleCorrection,      │
+│               WidthCalibration（既知幅で幅を合わせる） │
 │  Capture      CaptureQualityEvaluator, CoveragePlanner│
 │  Domain       InspectionProject / CaptureSession /   │
 │               CrackRecord / CrackGrade               │
@@ -85,7 +86,7 @@ Mac 上（および CI）で動かせるようにしています。
         ├─ Skeletonizer      Zhang-Suen 細線化
         ├─ PolylineTracer    枝分割・スパー除去・平滑化
         ├─ toFullResolution  芯線を原寸へ戻す
-        └─ WidthEstimator    **原寸**の断面の半値幅 + PSF補正 + mm換算
+        └─ WidthEstimator    **原寸**の断面の半値幅 + 幅校正（σ・太り）+ mm換算
         │
         ▼
    CrackMeasurement → CrackRecord → CSV / PDF
@@ -179,6 +180,7 @@ Documents/Projects/<projectID>/
 |---|---|
 | 検出アルゴリズムを差し替える | `CrackDetector.detect` |
 | 幅の定義を変える（例: 積分法） | `WidthEstimator.halfMaximumWidth` |
+| 幅の系統誤差の直し方を変える | `WidthCalibration`（順方向・逆方向・当てはめ） |
 | 判定区分を要領に合わせる | `InspectionProject.gradeThresholds` |
 | 帳票の様式を変える | `PDFReportRenderer` |
 | CSV の列を増やす | `CSVExporter.makeCSV` |

@@ -6,8 +6,11 @@ public struct WidthSample: Codable, Sendable {
     public let position: Vec2
     /// 幅を測った方向（線に直交する単位ベクトル）
     public let normal: Vec2
-    /// 画素単位の幅（サブピクセル）
+    /// 画素単位の幅（サブピクセル）。幅校正（PSF・オフセット）を当てた後の値
     public let widthPixels: Double
+    /// 補正前の半値幅（px）。**校正のやり直しに要る**ので必ず残す。
+    /// これがあれば、後から σ やオフセットを変えても撮り直さずに測り直せる
+    public let rawWidthPixels: Double
     /// 実寸幅（mm）
     public let widthMM: Double
     /// 断面のコントラスト（背景輝度に対する落ち込みの割合, 0...1）
@@ -21,6 +24,7 @@ public struct WidthSample: Codable, Sendable {
         position: Vec2,
         normal: Vec2,
         widthPixels: Double,
+        rawWidthPixels: Double? = nil,
         widthMM: Double,
         contrast: Double,
         millimetersPerPixel: Double,
@@ -29,6 +33,7 @@ public struct WidthSample: Codable, Sendable {
         self.position = position
         self.normal = normal
         self.widthPixels = widthPixels
+        self.rawWidthPixels = rawWidthPixels ?? widthPixels
         self.widthMM = widthMM
         self.contrast = contrast
         self.millimetersPerPixel = millimetersPerPixel
@@ -107,6 +112,9 @@ public struct WidthEstimator: Sendable {
         public var minContrast: Double
         /// レンズ+デモザイクによる実効 PSF の σ（px）。0 で補正なし。
         public var psfSigmaPx: Double
+        /// 半値幅に一定で乗る太り（px）。トーンカーブの非線形や印刷のにじみのように、
+        /// 幅に**比例せず一定量**乗るぶん。既知幅の線で `WidthCalibration` が解く
+        public var widthOffsetPx: Double
         /// 幅の代表値に使う上位パーセンタイル（1.0 だと単発ノイズを拾う）
         public var maxWidthPercentile: Double
 
@@ -117,6 +125,7 @@ public struct WidthEstimator: Sendable {
             maxProfileRadiusPx: Double = 28.0,
             minContrast: Double = 0.04,
             psfSigmaPx: Double = 0.8,
+            widthOffsetPx: Double = 0,
             maxWidthPercentile: Double = 0.95
         ) {
             self.sampleSpacingPx = sampleSpacingPx
@@ -125,6 +134,7 @@ public struct WidthEstimator: Sendable {
             self.maxProfileRadiusPx = maxProfileRadiusPx
             self.minContrast = minContrast
             self.psfSigmaPx = psfSigmaPx
+            self.widthOffsetPx = widthOffsetPx
             self.maxWidthPercentile = maxWidthPercentile
         }
 
@@ -169,7 +179,8 @@ public struct WidthEstimator: Sendable {
 
             let correctedPx = PointSpreadCorrection.correct(
                 measuredWidthPx: raw.widthPixels,
-                psfSigmaPx: options.psfSigmaPx
+                psfSigmaPx: options.psfSigmaPx,
+                offsetPx: options.widthOffsetPx
             )
             guard let mmPerPx = scale.millimetersPerPixel(at: point, direction: normal), mmPerPx > 0 else { continue }
 
@@ -184,6 +195,7 @@ public struct WidthEstimator: Sendable {
                     position: point,
                     normal: normal,
                     widthPixels: correctedPx,
+                    rawWidthPixels: raw.widthPixels,
                     widthMM: correctedPx * mmPerPx,
                     contrast: raw.contrast,
                     millimetersPerPixel: mmPerPx,
@@ -202,25 +214,11 @@ public struct WidthEstimator: Sendable {
             }
         }
 
-        let widths = samples.map(\.widthMM).sorted()
-        let maxIndex = min(widths.count - 1, Int((Double(widths.count - 1) * options.maxWidthPercentile).rounded()))
-        let maxWidth = widths[maxIndex]
-        let meanWidth = widths.reduce(0, +) / Double(widths.count)
-        let meanMMPerPx = samples.map(\.millimetersPerPixel).reduce(0, +) / Double(samples.count)
-        let meanConfidence = samples.map(\.confidence).reduce(0, +) / Double(samples.count)
-
-        let minimumMeasurable = meanMMPerPx * CaptureAdvisor.defaultMinimumPixelsAcrossCrack
-        let sufficient = maxWidth >= minimumMeasurable
-
-        return CrackMeasurement(
+        return CrackMeasurement.aggregating(
             centerline: resampled,
             samples: samples,
             lengthMM: lengthMM,
-            maxWidthMM: maxWidth,
-            meanWidthMM: meanWidth,
-            millimetersPerPixel: meanMMPerPx,
-            isResolutionSufficient: sufficient,
-            confidence: sufficient ? meanConfidence : meanConfidence * 0.5
+            maxWidthPercentile: options.maxWidthPercentile
         )
     }
 
@@ -371,12 +369,15 @@ public struct WidthEstimator: Sendable {
 /// 実効 PSF をガウシアン σ_psf、真の断面を矩形と近似すると、観測される半値幅は
 /// おおよそ √(w² + (2.355·σ_psf)²) 相当まで広がります。これを逆に解いて
 /// 真幅を推定します（真幅が PSF より十分小さいと解が消えるため下限でクランプ）。
+/// `offsetPx` は幅に比例せず一定で乗る太り（トーンカーブの非線形・印刷のにじみ）。
+/// PSF は二乗で効き（細い線ほど過大評価が大きい）、オフセットは一定で効く。
+/// 形が違うので、既知幅の線を 2 通り以上測れば分けて決められる（`WidthCalibration`）。
 public enum PointSpreadCorrection {
-    public static func correct(measuredWidthPx: Double, psfSigmaPx: Double) -> Double {
-        guard psfSigmaPx > 0 else { return measuredWidthPx }
-        let fwhm = 2.3548 * psfSigmaPx
-        let squared = measuredWidthPx * measuredWidthPx - fwhm * fwhm
-        guard squared > 0 else {
+    public static func correct(measuredWidthPx: Double, psfSigmaPx: Double, offsetPx: Double = 0) -> Double {
+        let reduced = measuredWidthPx - offsetPx
+        let fwhm = psfSigmaPx > 0 ? WidthCalibration.fwhmPerSigma * psfSigmaPx : 0
+        let squared = reduced * reduced - fwhm * fwhm
+        guard reduced > 0, squared > 0 else {
             // PSF に埋もれている: 補正後の下限として観測幅の 30% を返す
             return measuredWidthPx * 0.3
         }

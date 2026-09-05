@@ -36,6 +36,10 @@ final class MeasureViewModel: ObservableObject {
     @Published var isPlacingScale = false
     /// 目印の 2 点（表示座標）
     @Published private(set) var scaleMarksDisplay: [Vec2] = []
+    /// 幅の校正（既知幅の線で合わせた PSF σ と一定の太り）。案件から受け取る
+    @Published private(set) var calibration: WidthCalibration = .default
+    /// 既知幅の線の実幅を入れてもらっている
+    @Published var isCalibratingWidth = false
 
     /// 「全部測る」の候補に掛けるフィルタ。なぞり計測には掛けない
     var filter = CandidateFilter.default
@@ -53,6 +57,7 @@ final class MeasureViewModel: ObservableObject {
         strokesDisplay = []
         rejectedCount = 0
         isPlacingScale = false
+        isCalibratingWidth = false
         scaleMarksDisplay = []
         var notes: [String] = []
         if !still.isHighResolution {
@@ -74,7 +79,13 @@ final class MeasureViewModel: ObservableObject {
         strokesDisplay = []
         rejectedCount = 0
         isPlacingScale = false
+        isCalibratingWidth = false
         scaleMarksDisplay = []
+    }
+
+    /// 案件が持っている幅校正を受け取る（撮る前に呼ぶ）。
+    func useCalibration(_ calibration: WidthCalibration?) {
+        self.calibration = calibration ?? .default
     }
 
     // MARK: - 縦尺補正（スケールバー）
@@ -87,6 +98,7 @@ final class MeasureViewModel: ObservableObject {
 
     func beginPlacingScale() {
         isPlacingScale = true
+        isCalibratingWidth = false
         scaleMarksDisplay = []
     }
 
@@ -167,6 +179,92 @@ final class MeasureViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 幅校正（既知幅の線）
+
+    /// 校正に使える候補（選択がちょうど 1 本のときだけ）。
+    var calibrationTarget: Candidate? {
+        let selected = candidates.filter(\.isSelected)
+        return selected.count == 1 ? selected[0] : nil
+    }
+
+    func beginWidthCalibration() {
+        guard calibrationTarget != nil else {
+            errorMessage = "校正に使う線を 1 本だけ選んでください。クラックスケールの既知幅の目盛りをなぞって測ってから、その線を選びます"
+            return
+        }
+        isCalibratingWidth = true
+        isPlacingScale = false
+    }
+
+    func cancelWidthCalibration() {
+        isCalibratingWidth = false
+    }
+
+    /// 選んでいる線の実幅を教えて、幅の測り方（PSF σ と一定の太り）を合わせる。
+    ///
+    /// 幅の px は縦尺に依らないが、既知幅を px に直すのに mm/px が要る。
+    /// **先に縦尺を合わせてから**行う。
+    @discardableResult
+    func applyWidthCalibration(knownWidthMM: Double) -> WidthCalibration? {
+        guard let target = calibrationTarget else {
+            errorMessage = "校正に使う線を 1 本だけ選んでください"
+            return nil
+        }
+        guard knownWidthMM.isFinite, knownWidthMM > 0 else {
+            errorMessage = "実際の幅を数字で入れてください（例: 0.50）"
+            return nil
+        }
+        guard let raw = target.measurement.medianRawWidthPx,
+              let mmPerPx = target.measurement.medianMillimetersPerPixel else {
+            errorMessage = "この線からは校正に使える断面が取れませんでした。もう一度なぞってください"
+            return nil
+        }
+        let point = WidthCalibration.Point(
+            knownWidthMM: knownWidthMM,
+            rawWidthPx: raw,
+            millimetersPerPixel: mmPerPx
+        )
+        // 入れた幅と測った線が桁違いなら、線の取り違えか入力の間違い
+        guard point.knownWidthPx <= raw * 1.15 + 1, point.knownWidthPx >= raw * 0.15 else {
+            errorMessage = String(
+                format: "この線は %.2f mm 幅（半値幅 %.1f px）に見えています。入れた %.2f mm とは合いません。線か入力を確かめてください",
+                raw * mmPerPx, raw, knownWidthMM
+            )
+            return nil
+        }
+        var points = calibration.points
+        points.append(point)
+        let fitted = WidthCalibration.fit(points: points, fallback: calibration)
+        apply(calibration: fitted)
+        isCalibratingWidth = false
+        return fitted
+    }
+
+    /// 幅校正を外して設計値（σ 0.8・太りなし）に戻す。
+    @discardableResult
+    func clearWidthCalibration() -> WidthCalibration {
+        apply(calibration: .default)
+        isCalibratingWidth = false
+        return .default
+    }
+
+    /// 校正を測った候補すべてに当て直す。
+    ///
+    /// 補正前の半値幅を測点に残してあるので、**撮り直さずに**幅が付け替わる。
+    private func apply(calibration new: WidthCalibration) {
+        calibration = new
+        candidates = candidates.map { c in
+            Candidate(
+                id: c.id,
+                measurement: c.measurement.recalibrated(with: new),
+                centerlineInImage: c.centerlineInImage,
+                centerlineDisplay: c.centerlineDisplay,
+                scale: c.scale,
+                isSelected: c.isSelected
+            )
+        }
+    }
+
     func toggle(_ id: UUID) {
         guard let index = candidates.firstIndex(where: { $0.id == id }) else { return }
         candidates[index].isSelected.toggle()
@@ -194,7 +292,9 @@ final class MeasureViewModel: ObservableObject {
         let center = Vec2(Double(input.intrinsics.imageWidth) / 2, Double(input.intrinsics.imageHeight) / 2)
         let mmPerPx = scale.nominalMillimetersPerPixel(at: center) ?? 0
         let targetPx = AnalysisPlanner.targetWidthPx(targetWidthMM: targetCrackWidthMM, millimetersPerPixel: mmPerPx)
-        return AnalysisPlanner.detectorOptions(targetWidthPx: targetPx)
+        var base = CrackDetector.Options.default
+        base.width = calibration.applied(to: base.width)
+        return AnalysisPlanner.detectorOptions(targetWidthPx: targetPx, base: base)
     }
 
     private func makeCandidate(
@@ -303,7 +403,8 @@ final class MeasureViewModel: ObservableObject {
                     measurement: candidate.measurement,
                     scale: candidate.scale,
                     photoRelativePath: photoRelativePath,
-                    scaleCorrection: still?.scaleCorrection?.factor
+                    scaleCorrection: still?.scaleCorrection?.factor,
+                    widthCalibration: calibration.isMeasured ? calibration : nil
                 )
             )
             number += 1

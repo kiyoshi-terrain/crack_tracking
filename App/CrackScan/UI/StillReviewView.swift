@@ -13,10 +13,15 @@ struct StillReviewView: View {
     let onRecord: () -> Void
     /// 撮り直す（閉じる）
     let onRetake: () -> Void
+    /// 幅校正が変わった（案件に保存してもらう。nil は校正なしに戻す）
+    let onCalibrate: (WidthCalibration?) -> Void
 
     /// 縦尺合わせに入力する既知の長さ（mm）
     @State private var knownLengthText = "100"
+    /// 幅校正に入力する既知の幅（mm）
+    @State private var knownWidthText = "0.50"
     @State private var isConfirmingClearScale = false
+    @State private var isConfirmingClearCalibration = false
 
     var body: some View {
         ZStack {
@@ -60,6 +65,8 @@ struct StillReviewView: View {
                 Spacer()
                 if measurer.isPlacingScale {
                     scalePanel
+                } else if measurer.isCalibratingWidth {
+                    widthCalibrationPanel
                 } else {
                     bottomPanel
                 }
@@ -84,6 +91,15 @@ struct StillReviewView: View {
             Button("キャンセル", role: .cancel) {}
         } message: {
             Text("測った候補の幅・延長も LiDAR の縦尺に戻ります")
+        }
+        .confirmationDialog("幅校正を外しますか？", isPresented: $isConfirmingClearCalibration, titleVisibility: .visible) {
+            Button("設計値に戻す", role: .destructive) {
+                measurer.clearWidthCalibration()
+                onCalibrate(nil)
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("既知幅の線から決めた σ と太りを捨て、設計値（σ 0.8 px）に戻します。案件の設定も戻ります")
         }
     }
 
@@ -217,6 +233,83 @@ struct StillReviewView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
+    /// 幅校正（既知幅の線の実幅を入れてもらう）
+    private var widthCalibrationPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let target = measurer.calibrationTarget {
+                Text(String(
+                    format: "選んだ線は いま %.2f mm（半値幅 %.1f px）。この線の実際の幅を入れてください",
+                    target.measurement.maxWidthMM,
+                    target.measurement.medianRawWidthPx ?? 0
+                ))
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 10) {
+                TextField("実際の幅", text: $knownWidthText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 110)
+                    .monospacedDigit()
+                Text("mm")
+                    .font(.footnote)
+                Spacer()
+                Button {
+                    measurer.cancelWidthCalibration()
+                } label: {
+                    Text("やめる").font(.footnote)
+                }
+                .buttonStyle(.bordered)
+                Button {
+                    guard let known = Double(knownWidthText.trimmingCharacters(in: .whitespaces)) else {
+                        measurer.errorMessage = "幅を数字で入れてください（例: 0.50）"
+                        return
+                    }
+                    if let fitted = measurer.applyWidthCalibration(knownWidthMM: known) {
+                        onCalibrate(fitted)
+                    }
+                } label: {
+                    Label("この幅で合わせる", systemImage: "checkmark")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.mint)
+            }
+            Text("先に「縦尺」を合わせてください（既知幅を px に直すのに分解能を使います）。"
+                + "太い線と細い線の 2 通りを入れると、ボケ（σ）と一定の太りを分けて決められます")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 幅校正の状態（測ってあるときだけ出す）
+    @ViewBuilder
+    private var calibrationStatus: some View {
+        let calibration = measurer.calibration
+        if calibration.isMeasured {
+            HStack(spacing: 6) {
+                Image(systemName: "ruler.fill")
+                    .font(.caption2)
+                Text(String(
+                    format: "幅校正 σ %.2f px ／ 太り %+.1f px（既知幅 %d 点%@）",
+                    calibration.psfSigmaPx,
+                    calibration.offsetPx,
+                    calibration.points.count,
+                    calibration.rmsResidualPx.map { String(format: "・残差 %.2f px", $0) } ?? ""
+                ))
+                .font(.caption2)
+                .monospacedDigit()
+                Spacer(minLength: 0)
+                Button("外す") { isConfirmingClearCalibration = true }
+                    .font(.caption2)
+            }
+            .foregroundStyle(.mint)
+        }
+    }
+
     private func metric(_ value: String, unit: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 2) {
             Text(value)
@@ -230,6 +323,8 @@ struct StillReviewView: View {
 
     private var bottomPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // 校正の状態は、まだ何も測っていないときも出す（効いているのに見えないのが最悪）
+            calibrationStatus
             if measurer.candidates.isEmpty {
                 Label(
                     "亀裂に沿って 1 本の指でなぞると、その線の幅を測ります。2 本指で移動、ピンチで拡大。",
@@ -273,15 +368,27 @@ struct StillReviewView: View {
                 .buttonStyle(.bordered)
                 .disabled(measurer.isRunning)
 
+                // 既知幅の線（クラックスケールの目盛りなど）を測ってから押す
                 Button {
-                    onRecord()
+                    measurer.beginWidthCalibration()
                 } label: {
-                    Label("選択した \(measurer.selectedCount) 本を記録", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
+                    Label("幅校正", systemImage: "ruler.fill")
+                        .font(.footnote.weight(.semibold))
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(measurer.selectedCount == 0)
+                .buttonStyle(.bordered)
+                .tint(measurer.calibrationTarget == nil ? .white : .mint)
+
+                Spacer(minLength: 0)
             }
+
+            Button {
+                onRecord()
+            } label: {
+                Label("選択した \(measurer.selectedCount) 本を記録", systemImage: "square.and.arrow.down")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(measurer.selectedCount == 0)
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))

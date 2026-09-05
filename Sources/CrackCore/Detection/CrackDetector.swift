@@ -355,23 +355,11 @@ extension CrackMeasurement {
         let samples = parts.flatMap(\.samples)
         guard samples.count >= 2 else { return nil }
 
-        let widths = samples.map(\.widthMM).sorted()
-        let maxIndex = min(widths.count - 1, Int((Double(widths.count - 1) * maxWidthPercentile).rounded()))
-        let maxWidth = widths[maxIndex]
-        let meanWidth = widths.reduce(0, +) / Double(widths.count)
-        let meanMMPerPx = samples.map(\.millimetersPerPixel).reduce(0, +) / Double(samples.count)
-        let meanConfidence = samples.map(\.confidence).reduce(0, +) / Double(samples.count)
-        let sufficient = maxWidth >= meanMMPerPx * CaptureAdvisor.defaultMinimumPixelsAcrossCrack
-
-        return CrackMeasurement(
+        return CrackMeasurement.aggregating(
             centerline: parts.flatMap(\.centerline),
             samples: samples,
             lengthMM: parts.map(\.lengthMM).reduce(0, +),
-            maxWidthMM: maxWidth,
-            meanWidthMM: meanWidth,
-            millimetersPerPixel: meanMMPerPx,
-            isResolutionSufficient: sufficient,
-            confidence: sufficient ? meanConfidence : meanConfidence * 0.5
+            maxWidthPercentile: maxWidthPercentile
         )
     }
 }

@@ -35,6 +35,9 @@ extension CrackMeasurement {
                 position: s.position,
                 normal: s.normal,
                 widthPixels: s.widthPixels,
+                // 補正前の半値幅は画素の量なので縦尺では変わらない。**落とさない**
+                // （後から幅校正を当て直すのに要る）
+                rawWidthPixels: s.rawWidthPixels,
                 widthMM: s.widthMM * factor,
                 contrast: s.contrast,
                 millimetersPerPixel: s.millimetersPerPixel * factor,
