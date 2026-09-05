@@ -33,8 +33,17 @@ public enum RidgeThresholder {
         public static let `default` = Options()
     }
 
-    public static func mask(from field: RidgeField, options: Options = .default) -> BinaryMask {
-        let suppressed = nonMaximumSuppression(field)
+    /// - Parameter region: 与えると、この領域の中の応答だけでしきい値を決め、外は捨てる。
+    ///   なぞり計測用。画面全体のパーセンタイルだと、回廊の外にもっと強い構造（目地）が
+    ///   あるときに亀裂が種を持てず丸ごと消える（合成検証で実際に消えた）。
+    public static func mask(from field: RidgeField, options: Options = .default, within region: BinaryMask? = nil) -> BinaryMask {
+        var suppressed = nonMaximumSuppression(field)
+        if let region {
+            precondition(region.width == suppressed.width && region.height == suppressed.height, "領域の寸法が違う")
+            for i in 0..<suppressed.pixels.count where !region.values[i] {
+                suppressed.pixels[i] = 0
+            }
+        }
         let high = max(
             options.absoluteFloor,
             ImageFilters.percentile(suppressed.pixels.filter { $0 > 0 }, options.highPercentile)

@@ -9,13 +9,15 @@
 ┌──────────────────────────────────────────────────────┐
 │ App/CrackScan  (iOS 専用・ARKit / SwiftUI)            │
 │                                                      │
-│  UI ──── CaptureView / ProjectDetailView / …         │
+│  UI ──── CaptureView（ライブ・枠）                     │
+│          StillReviewView / ZoomableStillView（静止画）│
+│          ProjectDetailView / …                       │
 │   │                                                  │
 │  Capture ── ARCaptureController                      │
 │   │          DepthPlaneEstimator  (LiDAR → 平面)      │
 │   │          FrameBundleWriter    (画像/深度/メタ保存) │
 │   │                                                  │
-│  Measure ── MeasureViewModel                         │
+│  Measure ── MeasureViewModel / MeasurementStill      │
 │   │          CrackMeasurementService (actor)         │
 │   │                                                  │
 │  その他 ── PhotogrammetryRunner / PDFReportRenderer   │
@@ -30,8 +32,10 @@
 │  Imaging      GrayImage, ImageFilters                │
 │  Detection    RidgeDetector, RidgeThresholder,       │
 │               Skeletonizer, PolylineTracer,          │
-│               CrackDetector                          │
-│  Measurement  WidthEstimator, PointSpreadCorrection  │
+│               CrackDetector, AnalysisPlanner,        │
+│               StrokePath（なぞった線の近傍と区間）      │
+│  Measurement  WidthEstimator, PointSpreadCorrection, │
+│               CandidateFilter                        │
 │  Capture      CaptureQualityEvaluator, CoveragePlanner│
 │  Domain       InspectionProject / CaptureSession /   │
 │               CrackRecord / CrackGrade               │
@@ -49,6 +53,15 @@ Mac 上（および CI）で動かせるようにしています。
 ---
 
 ## 計測の流れ
+
+操作は「撮る → 静止画の上でなぞる → 選んで記録」の 3 段。
+
+1. `ARCaptureController.captureStill()` — 動きが収まるのを待ち、高解像度フレーム・
+   壁面・ブレ指標・表示用に回した画像を `MeasurementStill` に固定する
+2. `StillReviewView` — 静止画をピンチで拡大し、亀裂を 1 本指でなぞる。
+   `MeasureViewModel.measureAlong` が `RotatedImageMapping` で元画像座標へ戻し、
+   `CrackDetector.measureAlong` でなぞった線の近傍・区間だけを測る
+3. 「枠内を全部測る」は `detect` に `CandidateFilter` を掛けたもの。既定で選ばない
 
 ```
         ┌─── ARFrame (高解像度) ───┐

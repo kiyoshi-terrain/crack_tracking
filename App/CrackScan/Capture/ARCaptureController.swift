@@ -40,8 +40,9 @@ final class ARCaptureController: NSObject, ObservableObject {
     @Published private(set) var coverageRatio: Double = 0
     @Published var errorMessage: String?
 
-    /// 計測レティクル（画面中央の枠）の正規化サイズ
+    /// 計測レティクル（画面の枠）の正規化サイズと中心（**画面**正規化）。ピンチとドラッグで変える
     @Published var reticleSize: CGFloat = 0.5
+    @Published var reticleCenter = CGPoint(x: 0.5, y: 0.5)
 
     /// 高解像度フレームの画素数。HUD の分解能はこれで計算する。
     ///
@@ -64,6 +65,13 @@ final class ARCaptureController: NSObject, ObservableObject {
     /// 枠を画像へ写し、解析できる画素数の上限で中心から縮めた結果を画面へ戻したもの。
     /// 黙って中央だけ切ると「枠に入れたのに検出されない」が起きる。
     @Published private(set) var analysisRegionOnScreen: CGRect?
+    /// 解析範囲の実寸（mm）。枠の下に出す
+    @Published private(set) var analysisRegionSizeMM: CGSize?
+
+    /// カメラの動き（°/s）。手ブレ判定と、計測前の静止待ちに使う
+    @Published private(set) var motionDegPerSec: Double = 0
+    /// 計測のために静止を待っている
+    @Published private(set) var isWaitingForStillness = false
 
     let session = ARSession()
 
@@ -75,6 +83,9 @@ final class ARCaptureController: NSObject, ObservableObject {
     /// 直近のライブ推定。高解像度フレームに深度が付いてこないときの代わりに使う
     /// （0.2 秒以内のフレームなら、手持ちでも姿勢差は mm 級で LiDAR の誤差より小さい）
     private var latestEstimate: (estimate: DepthPlaneEstimator.Estimate, at: Date)?
+    /// ライブ映像の画素数（ブレ指標を同じ尺度で出すため）
+    private var liveResolution: CGSize?
+    private var lastMotionSample: (transform: simd_float4x4, timestamp: TimeInterval)?
 
     private var lastEvaluation = Date.distantPast
     private let evaluationInterval: TimeInterval = 0.2
@@ -100,7 +111,10 @@ final class ARCaptureController: NSObject, ObservableObject {
         captureResolution = nil
         isProbingCaptureResolution = false
         latestEstimate = nil
+        lastMotionSample = nil
+        motionDegPerSec = 0
         analysisRegionOnScreen = nil
+        analysisRegionSizeMM = nil
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.worldAlignment = .gravity
@@ -132,11 +146,11 @@ final class ARCaptureController: NSObject, ObservableObject {
         session.pause()
     }
 
-    // MARK: - 撮影
+    // MARK: - 撮影（記録用フレームの保存）
 
-    /// 高解像度フレームを1枚保存する。
+    /// 高解像度フレームを1枚保存する（写真測量・再解析の元データ）。
     func capture() {
-        guard let directory = sessionDirectory else {
+        guard sessionDirectory != nil else {
             errorMessage = "保存先が設定されていません"
             return
         }
@@ -156,10 +170,71 @@ final class ARCaptureController: NSObject, ObservableObject {
                     return
                 }
                 guard let frame else { return }
-                self.save(frame: frame, into: directory)
+                let region = self.analysisRegion(for: frame)
+                guard let estimate = DepthPlaneEstimator.estimate(frame: frame, normalizedRegion: region) ?? self.recentEstimate else {
+                    self.errorMessage = "壁面までの距離を取得できませんでした。もう少し近づいてゆっくり動かしてください"
+                    return
+                }
+                _ = self.save(frame: frame, estimate: estimate)
             }
         }
     }
+
+    /// 計測に使った静止画を記録として保存する（計測値の証拠写真になる）。
+    @discardableResult
+    func saveStill(_ still: MeasurementStill) -> CapturedFrame? {
+        save(frame: still.frame, estimate: still.estimate)
+    }
+
+    private func save(frame: ARFrame, estimate: DepthPlaneEstimator.Estimate) -> CapturedFrame? {
+        guard let directory = sessionDirectory else {
+            errorMessage = "保存先が設定されていません"
+            return nil
+        }
+        guard let conditions = makeConditions(frame: frame, estimate: estimate) else { return nil }
+
+        let index = frameCounter
+        frameCounter += 1
+
+        do {
+            let bundle = try writer.write(frame: frame, index: index, into: directory)
+            let captured = CapturedFrame(
+                index: index,
+                capturedAt: Date(),
+                intrinsics: DepthPlaneEstimator.cameraIntrinsics(frame: frame),
+                plane: estimate.plane,
+                cameraTransform: frame.camera.transform,
+                conditions: conditions,
+                imageURL: bundle.imageURL,
+                depthURL: bundle.depthURL
+            )
+            capturedFrames.append(captured)
+            recordCoverage(for: captured)
+            return captured
+        } catch {
+            errorMessage = "保存に失敗しました: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    private func recordCoverage(for frame: CapturedFrame) {
+        guard var tracker = coverage else { return }
+        let scale = SurfaceScale(intrinsics: frame.intrinsics, plane: frame.plane)
+        let center = Vec2(Double(frame.intrinsics.imageWidth) / 2, Double(frame.intrinsics.imageHeight) / 2)
+        guard let mmPerPx = scale.nominalMillimetersPerPixel(at: center) else { return }
+        let width = Double(frame.intrinsics.imageWidth) * mmPerPx / 1000
+        let height = Double(frame.intrinsics.imageHeight) * mmPerPx / 1000
+
+        // カメラ位置をそのまま壁面座標に見立てた簡易カバレッジ。
+        // 厳密な壁面座標系は後段の写真測量で確定する。
+        let t = frame.cameraTransform.columns.3
+        let origin = Vec2(Double(t.x) + 2.0 - width / 2, Double(t.y) + 1.5 - height / 2)
+        tracker.record(footprintOrigin: origin, width: width, height: height)
+        coverage = tracker
+        coverageRatio = tracker.coverageRatio
+    }
+
+    // MARK: - 計測用の静止画
 
     /// 計測用のフレームを1枚取得する（保存はしない）。
     ///
@@ -183,59 +258,112 @@ final class ARCaptureController: NSObject, ObservableObject {
         return latest.estimate
     }
 
-    private func save(frame: ARFrame, into directory: URL) {
+    /// 計測用の静止画を撮る。
+    ///
+    /// 手持ちで動いている間に撮ると断面がボケて幅が太く出るので、動きが収まるのを
+    /// 最大 1.5 秒待ってから撮る。撮った画像のブレも同じ尺度で測って結果に添える。
+    func captureStill() async -> MeasurementStill? {
+        isWaitingForStillness = true
+        let deadline = Date().addingTimeInterval(1.5)
+        while motionDegPerSec > evaluator.thresholds.stillnessDegPerSec, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        isWaitingForStillness = false
+
+        guard let captured = await measurementFrame() else {
+            errorMessage = "フレームを取得できませんでした。カメラが動いているか確認してください"
+            return nil
+        }
+        let frame = captured.frame
         let region = analysisRegion(for: frame)
-        guard let estimate = DepthPlaneEstimator.estimate(frame: frame, normalizedRegion: region) ?? recentEstimate else {
-            errorMessage = "壁面までの距離を取得できませんでした。もう少し近づいてゆっくり動かしてください"
-            return
-        }
-        guard let conditions = makeConditions(frame: frame, estimate: estimate) else { return }
 
-        let index = frameCounter
-        frameCounter += 1
-
-        do {
-            let bundle = try writer.write(frame: frame, index: index, into: directory)
-            let captured = CapturedFrame(
-                index: index,
-                capturedAt: Date(),
-                intrinsics: DepthPlaneEstimator.cameraIntrinsics(frame: frame),
-                plane: estimate.plane,
-                cameraTransform: frame.camera.transform,
-                conditions: conditions,
-                imageURL: bundle.imageURL,
-                depthURL: bundle.depthURL
-            )
-            capturedFrames.append(captured)
-            recordCoverage(for: captured)
-        } catch {
-            errorMessage = "保存に失敗しました: \(error.localizedDescription)"
+        var usedFallback = false
+        var estimate = DepthPlaneEstimator.estimate(frame: frame, normalizedRegion: region)
+        if estimate == nil, let recent = recentEstimate {
+            estimate = recent
+            usedFallback = true
         }
+        guard let estimate else {
+            errorMessage = "壁面までの距離を取得できませんでした。LiDAR の届く距離（〜3m）まで近づいて、少し待ってからもう一度押してください"
+            return nil
+        }
+
+        let size = frame.capturedImageSize
+        let intrinsics = DepthPlaneEstimator.cameraIntrinsics(frame: frame)
+        let scale = SurfaceScale(intrinsics: intrinsics, plane: estimate.plane)
+        let center = Vec2(region.midX * size.width, region.midY * size.height)
+        let mmPerPx = scale.nominalMillimetersPerPixel(at: center) ?? 0
+        let distance = scale.distance(at: center) ?? estimate.centerDistance
+
+        let focus = stillFocusScore(frame: frame, region: region)
+        let turns = ImageConversion.quarterTurnsClockwise(for: ARDisplayMapping.currentOrientation)
+        guard let display = ImageConversion.cgImage(from: frame.capturedImage, quarterTurnsClockwise: turns) else {
+            errorMessage = "画像を表示用に変換できませんでした"
+            return nil
+        }
+
+        return MeasurementStill(
+            frame: frame,
+            isHighResolution: captured.isHighResolution,
+            estimate: estimate,
+            usedFallbackEstimate: usedFallback,
+            analysisRegion: region,
+            display: display,
+            mapping: RotatedImageMapping(rawWidth: Int(size.width), rawHeight: Int(size.height), quarterTurnsClockwise: turns),
+            focusScore: focus,
+            isSharp: focus >= evaluator.thresholds.minFocusScore,
+            millimetersPerPixel: mmPerPx,
+            distance: distance,
+            capturedAt: Date()
+        )
     }
 
-    private func recordCoverage(for frame: CapturedFrame) {
-        guard var tracker = coverage else { return }
-        let scale = SurfaceScale(intrinsics: frame.intrinsics, plane: frame.plane)
-        let center = Vec2(Double(frame.intrinsics.imageWidth) / 2, Double(frame.intrinsics.imageHeight) / 2)
-        guard let mmPerPx = scale.nominalMillimetersPerPixel(at: center) else { return }
-        let width = Double(frame.intrinsics.imageWidth) * mmPerPx / 1000
-        let height = Double(frame.intrinsics.imageHeight) * mmPerPx / 1000
-
-        // カメラ位置をそのまま壁面座標に見立てた簡易カバレッジ。
-        // 厳密な壁面座標系は後段の写真測量で確定する。
-        let t = frame.cameraTransform.columns.3
-        let origin = Vec2(Double(t.x) + 2.0 - width / 2, Double(t.y) + 1.5 - height / 2)
-        tracker.record(footprintOrigin: origin, width: width, height: height)
-        coverage = tracker
-        coverageRatio = tracker.coverageRatio
+    /// 静止画のブレ指標。ライブ判定と同じ尺度で出すため、ライブ映像の画素密度まで縮小してから測る。
+    private func stillFocusScore(frame: ARFrame, region: CGRect) -> Double {
+        let size = frame.capturedImageSize
+        let live = liveResolution ?? size
+        guard live.width > 0 else { return 0 }
+        let ratio = max(1, Int((size.width / live.width).rounded()))
+        let side = Int(min(live.width, live.height)) / 6 * ratio
+        let probe = PixelRect(
+            x: Int(region.midX * size.width) - side / 2,
+            y: Int(region.midY * size.height) - side / 2,
+            width: side,
+            height: side
+        ).clamped(toWidth: Int(size.width), height: Int(size.height))
+        guard probe.width > 8, probe.height > 8,
+              let gray = ImageConversion.grayImage(from: frame.capturedImage, region: probe, linearize: false) else { return 0 }
+        return ImageFilters.varianceOfLaplacian(ratio > 1 ? gray.downsampled(by: ratio) : gray)
     }
 
     // MARK: - 解析範囲
 
-    /// レティクル（画面中央の計測枠）の**画面**正規化矩形。
+    /// レティクル（計測枠）の**画面**正規化矩形。画面の中に収まるようにクランプする。
     func reticleRegion() -> CGRect {
         let size = max(0.1, min(0.9, reticleSize))
-        return CGRect(x: (1 - size) / 2, y: (1 - size) / 2, width: size, height: size)
+        let cx = min(max(reticleCenter.x, size / 2), 1 - size / 2)
+        let cy = min(max(reticleCenter.y, size / 2), 1 - size / 2)
+        return CGRect(x: cx - size / 2, y: cy - size / 2, width: size, height: size)
+    }
+
+    /// 枠を動かした直後に、描く枠を最新のフレームで作り直す（次の評価を待たない）。
+    func refreshAnalysisRegionOnScreen() {
+        guard let frame = session.currentFrame else { return }
+        let region = analysisRegion(for: frame)
+        analysisRegionOnScreen = screenNormalizedRect(imageRect: region, frame: frame)
+        updateRegionSize(region: region, frame: frame)
+    }
+
+    private func updateRegionSize(region: CGRect, frame: ARFrame) {
+        guard let c = conditions else {
+            analysisRegionSizeMM = nil
+            return
+        }
+        let size = captureResolution ?? frame.capturedImageSize
+        analysisRegionSizeMM = CGSize(
+            width: region.width * size.width * c.millimetersPerPixel,
+            height: region.height * size.height * c.millimetersPerPixel
+        )
     }
 
     /// 検出の縮小率。直近の分解能と目標幅から（`AnalysisPlanner`）。
@@ -307,6 +435,7 @@ final class ARCaptureController: NSObject, ObservableObject {
     // MARK: - リアルタイム評価
 
     private func evaluate(frame: ARFrame) {
+        liveResolution = frame.capturedImageSize
         let region = analysisRegion(for: frame)
         analysisRegionOnScreen = screenNormalizedRect(imageRect: region, frame: frame)
 
@@ -317,13 +446,37 @@ final class ARCaptureController: NSObject, ObservableObject {
         ) else {
             conditions = nil
             verdict = nil
+            analysisRegionSizeMM = nil
             return
         }
         latestEstimate = (estimate, Date())
+        updateMotion(frame: frame, distance: estimate.centerDistance)
         probeCaptureResolutionIfNeeded(frame: frame)
         guard let c = makeConditions(frame: frame, estimate: estimate) else { return }
         conditions = c
         verdict = evaluator.evaluate(c)
+        updateRegionSize(region: region, frame: frame)
+    }
+
+    /// カメラの動きを °/s で出す。回転と、距離で割った並進（像の動きとしては同じ）の大きい方。
+    private func updateMotion(frame: ARFrame, distance: Double) {
+        let transform = frame.camera.transform
+        defer { lastMotionSample = (transform, frame.timestamp) }
+        guard let last = lastMotionSample else { return }
+        let dt = frame.timestamp - last.timestamp
+        guard dt > 0.02 else { return }
+
+        let q0 = simd_quatf(last.transform)
+        let q1 = simd_quatf(transform)
+        var angle = Double((q1 * q0.inverse).angle)
+        if angle > .pi { angle = 2 * .pi - angle }
+
+        let p0 = simd_make_float3(last.transform.columns.3)
+        let p1 = simd_make_float3(transform.columns.3)
+        let translation = Double(simd_length(p1 - p0))
+        let equivalent = translation / max(distance, 0.1)
+
+        motionDegPerSec = max(angle, equivalent) / dt * 180 / .pi
     }
 
     /// 高解像度フレームの画素数を 1 回だけ調べる（保存はしない）。
@@ -386,7 +539,8 @@ final class ARCaptureController: NSObject, ObservableObject {
             meanLuminance: Double(probe.mean),
             saturatedRatio: ImageConversion.saturatedRatio(probe),
             planeResidual: estimate.rmsResidual,
-            isTrackingStable: stable
+            isTrackingStable: stable,
+            angularSpeedDegPerSec: motionDegPerSec
         )
     }
 }
