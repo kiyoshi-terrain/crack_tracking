@@ -230,8 +230,10 @@ docs/accuracy.md      精度の根拠と限界（実運用前に必読）
   （1 秒以内）のライブ推定で代用し、その旨を結果に注記する。高解像度が取れなければ
   ライブ映像で測って注記する。黙って「取得できませんでした」で止めるのが最悪。
 - **人ごとに違うビルド設定は Local.xcconfig** — Team ID を project.yml に書くと
-  `git pull` のたびに衝突する。gitignore した xcconfig から読み、無くても
-  生成・CI が止まらないよう `disabledValidations: [missingConfigFiles]`。
+  `git pull` のたびに衝突する。gitignore した Local.xcconfig を、git 管理の
+  Config/Base.xcconfig が `#include?` で任意に取り込む。project.yml から無いかも
+  しれないファイルを直接指すと Xcode は "Unable to open base configuration reference
+  file" で**ビルドを止める**（警告ではない。CI で実際に止まった）。
 
 ## UI 方針
 **ダークアウトドアテーマ（フォレストグリーン + アンバー）** — field-note-app と共通。

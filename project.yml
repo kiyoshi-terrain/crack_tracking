@@ -16,16 +16,16 @@ options:
   createIntermediateGroups: true
   developmentLanguage: ja
   groupSortPosition: top
-  # Local.xcconfig は各自の手元にだけある（.gitignore 済み）。無くても生成を止めない
-  disabledValidations:
-    - missingConfigFiles
 
 # 署名の Team ID など、人ごとに違う設定は Local.xcconfig に書く（このファイルは触らない）。
 #   cp Local.xcconfig.example Local.xcconfig   → DEVELOPMENT_TEAM を自分の Team ID に
-# 無いときは Xcode が警告を出すだけで、CI（署名なし）はそのまま通る。
+# Config/Base.xcconfig が Local.xcconfig を `#include?` で任意に取り込む。
+# 参照先が無いファイルを直接指すと Xcode は "Unable to open base configuration reference
+# file" でビルドを止める（警告ではなくエラー。CI で実際に止まった）ので、必ず存在する
+# Base.xcconfig を指し、無くてもよい方は #include? に任せる。
 configFiles:
-  Debug: Local.xcconfig
-  Release: Local.xcconfig
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
 
 settings:
   base:

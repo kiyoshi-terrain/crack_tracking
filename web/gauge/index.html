@@ -244,7 +244,7 @@
         <!-- 四隅の見当 -->
         <g stroke="#000" stroke-width="0.3" fill="none">
           <path d="M8 8 h6 M8 8 v6"/><path d="M202 8 h-6 M202 8 v6"/>
-          <path d="M8 289 h6 M8 289 v6"/><path d="M202 289 h-6 M202 289 v-6"/>
+          <path d="M8 289 h6 M8 289 v-6"/><path d="M202 289 h-6 M202 289 v-6"/>
         </g>
       </svg>
     </div>
@@ -259,11 +259,12 @@
     const sheet = scaler.querySelector('.sheet');
     scaler.style.transform = 'none';
     const available = frame.clientWidth - 28;
-    const natural = sheet.getBoundingClientRect().width;
-    if (!natural) return;
-    const factor = Math.min(1, available / natural);
+    const natural = sheet.getBoundingClientRect();
+    if (!natural.width) return;
+    const factor = Math.min(1, available / natural.width);
     scaler.style.transform = `scale(${factor})`;
-    scaler.style.height = `${sheet.getBoundingClientRect().height * factor}px`;
+    // 高さは変形前の寸法から出す（変形後の矩形に factor を掛けると二重に縮んで下が切れる）
+    scaler.style.height = `${natural.height * factor}px`;
   }
   window.addEventListener('resize', fitSheet);
   window.addEventListener('load', fitSheet);
