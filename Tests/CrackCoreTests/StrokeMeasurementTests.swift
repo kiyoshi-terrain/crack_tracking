@@ -77,6 +77,35 @@ final class StrokeMeasurementTests: XCTestCase {
         XCTAssertEqual(crack.maxWidthMM, 0.6, accuracy: 0.12)
     }
 
+    /// 回廊に平行な線が 2 本入ったら、長い方ではなく**なぞった線に近い方**を採る。
+    /// クラックスケールの目盛りは数 mm 間隔で並ぶので、長さで選ぶと隣の目盛りが出る。
+    func testStrokePrefersTheNearerOfTwoParallelLines() throws {
+        let size = 400
+        var image = GrayImage(width: size, height: size, repeating: 0.85)
+        // A: x=199.5、短い（y 100..300）。B: x=214.5、長い（y 40..360）。どちらも 6px
+        paintVerticalLine(&image, centerX: 200, halfWidth: 3, value: 0.30, rows: 100..<300)
+        paintVerticalLine(&image, centerX: 215, halfWidth: 3, value: 0.30, rows: 40..<360)
+        let scale = SyntheticImage.frontoParallelScale(imageWidth: size, imageHeight: size, focalPixels: 1000, distance: 0.1)
+        let detector = CrackDetector(options: AnalysisPlanner.detectorOptions(targetWidthPx: 6))
+
+        // A の真上をなぞる。半径 30 なので B も回廊に入る
+        let crack = try XCTUnwrap(
+            detector.measureAlong(in: image, stroke: [Vec2(200, 120), Vec2(200, 280)], scale: scale, searchRadiusPx: 30)
+        )
+        for point in crack.centerline {
+            XCTAssertEqual(point.x, 199.5, accuracy: 1.5, "長い方（隣の線）を拾った")
+        }
+        XCTAssertEqual(crack.maxWidthMM, 0.6, accuracy: 0.12)
+
+        // B の真上をなぞれば B
+        let other = try XCTUnwrap(
+            detector.measureAlong(in: image, stroke: [Vec2(215, 120), Vec2(215, 280)], scale: scale, searchRadiusPx: 30)
+        )
+        for point in other.centerline {
+            XCTAssertEqual(point.x, 214.5, accuracy: 1.5)
+        }
+    }
+
     /// 縮小率 > 1 でもなぞり計測は原寸座標で受けて原寸座標で返す。
     func testStrokeWorksWithDownsampledDetection() throws {
         let size = 400
