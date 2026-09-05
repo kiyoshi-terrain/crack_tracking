@@ -123,6 +123,8 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
     public var note: String
     /// 手入力で上書きした場合の値（クラックスケールで実測した値など）
     public var manualWidthMM: Double?
+    /// 既知の長さ（スケールバー）で合わせた縦尺の倍率。nil なら LiDAR の縦尺のまま
+    public var scaleCorrection: Double?
 
     public init(
         id: UUID = UUID(),
@@ -141,7 +143,8 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
         widthSamplesMM: [Double] = [],
         photoRelativePath: String? = nil,
         note: String = "",
-        manualWidthMM: Double? = nil
+        manualWidthMM: Double? = nil,
+        scaleCorrection: Double? = nil
     ) {
         self.id = id
         self.label = label
@@ -160,6 +163,7 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
         self.photoRelativePath = photoRelativePath
         self.note = note
         self.manualWidthMM = manualWidthMM
+        self.scaleCorrection = scaleCorrection
     }
 
     /// 帳票に載せる幅（手入力があればそちらを優先）。
@@ -176,7 +180,8 @@ extension CrackRecord {
         label: String,
         measurement: CrackMeasurement,
         scale: SurfaceScale,
-        photoRelativePath: String? = nil
+        photoRelativePath: String? = nil,
+        scaleCorrection: Double? = nil
     ) {
         // 代表点は芯線の中央。撮影距離・入射角はここの値を記録する。
         let representative = measurement.centerline.isEmpty
@@ -196,7 +201,8 @@ extension CrackRecord {
             worldPosition: scale.worldPoint(at: representative),
             centerlinePixels: measurement.centerline,
             widthSamplesMM: measurement.samples.map(\.widthMM),
-            photoRelativePath: photoRelativePath
+            photoRelativePath: photoRelativePath,
+            scaleCorrection: scaleCorrection
         )
     }
 }

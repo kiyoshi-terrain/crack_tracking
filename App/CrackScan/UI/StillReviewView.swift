@@ -14,6 +14,10 @@ struct StillReviewView: View {
     /// 撮り直す（閉じる）
     let onRetake: () -> Void
 
+    /// 縦尺合わせに入力する既知の長さ（mm）
+    @State private var knownLengthText = "100"
+    @State private var isConfirmingClearScale = false
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -24,7 +28,11 @@ struct StillReviewView: View {
                     frameRect: still.analysisRegionDisplay,
                     lines: overlayLines,
                     guideStrokes: measurer.strokesDisplay.map { $0.map { CGPoint(x: $0.x, y: $0.y) } },
+                    scaleMarks: measurer.scaleMarksDisplay.map { CGPoint(x: $0.x, y: $0.y) },
+                    scaleLabel: scaleLabel,
                     onStroke: { points, radius in
+                        // 目印を置いている間は、なぞっても測らない（誤操作を避ける）
+                        guard !measurer.isPlacingScale else { return }
                         Task {
                             await measurer.measureAlong(
                                 displayStroke: points.map { Vec2($0.x, $0.y) },
@@ -34,7 +42,9 @@ struct StillReviewView: View {
                         }
                     },
                     onTap: { point, radius in
-                        if let id = measurer.nearestCandidate(toDisplayPoint: Vec2(point.x, point.y), within: Double(radius)) {
+                        if measurer.isPlacingScale {
+                            measurer.addScaleMark(Vec2(point.x, point.y))
+                        } else if let id = measurer.nearestCandidate(toDisplayPoint: Vec2(point.x, point.y), within: Double(radius)) {
                             measurer.toggle(id)
                         }
                     }
@@ -48,7 +58,11 @@ struct StillReviewView: View {
                     banner(notice, color: .orange, icon: "exclamationmark.triangle.fill")
                 }
                 Spacer()
-                bottomPanel
+                if measurer.isPlacingScale {
+                    scalePanel
+                } else {
+                    bottomPanel
+                }
             }
             .padding()
 
@@ -65,6 +79,23 @@ struct StillReviewView: View {
         } message: {
             Text(measurer.errorMessage ?? "")
         }
+        .confirmationDialog("縦尺補正を外しますか？", isPresented: $isConfirmingClearScale, titleVisibility: .visible) {
+            Button("LiDAR の縦尺に戻す", role: .destructive) { measurer.clearScaleCorrection() }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("測った候補の幅・延長も LiDAR の縦尺に戻ります")
+        }
+    }
+
+    /// 目印 2 点のあいだに出すラベル
+    private var scaleLabel: String? {
+        if let correction = measurer.still?.scaleCorrection, !measurer.isPlacingScale {
+            return String(format: "%.0f mm（×%.3f）", correction.knownMM, correction.factor)
+        }
+        if let measured = measurer.scaleMarksMeasuredMM {
+            return String(format: "%.1f mm", measured)
+        }
+        return nil
     }
 
     // MARK: - パーツ
@@ -94,12 +125,36 @@ struct StillReviewView: View {
             .buttonStyle(.bordered)
             .tint(.white)
 
+            Button {
+                if measurer.isPlacingScale {
+                    measurer.cancelPlacingScale()
+                } else {
+                    measurer.beginPlacingScale()
+                }
+            } label: {
+                Label(measurer.isPlacingScale ? "やめる" : "縦尺", systemImage: "ruler")
+                    .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .tint(measurer.isPlacingScale ? .cyan : .white)
+
             Spacer()
 
             if let still = measurer.still {
                 HStack(spacing: 10) {
                     metric(String(format: "%.3f", still.millimetersPerPixel), unit: "mm/px")
                     metric(String(format: "%.2f", still.distance), unit: "m")
+                    if let correction = still.scaleCorrection {
+                        Button {
+                            isConfirmingClearScale = true
+                        } label: {
+                            Text(String(format: "×%.3f", correction.factor))
+                                .font(.caption2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(.cyan)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     if !still.isHighResolution {
                         Text("ライブ")
                             .font(.caption2.weight(.semibold))
@@ -111,6 +166,55 @@ struct StillReviewView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
             }
         }
+    }
+
+    /// 縦尺合わせの操作（目印を置いている間だけ出す）
+    private var scalePanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if measurer.scaleMarksDisplay.count < 2 {
+                Label(
+                    measurer.scaleMarksDisplay.isEmpty
+                        ? "既知の長さ（100 mm の目印など）の片方の端をタップ。ピンチで拡大すると正確です"
+                        : "もう片方の端をタップ",
+                    systemImage: "ruler"
+                )
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                if let measured = measurer.scaleMarksMeasuredMM {
+                    Text(String(format: "LiDAR の縦尺では %.1f mm。実際の長さを入れてください", measured))
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 10) {
+                    TextField("実際の長さ", text: $knownLengthText)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 110)
+                        .monospacedDigit()
+                    Text("mm")
+                        .font(.footnote)
+                    Spacer()
+                    Button {
+                        if let known = Double(knownLengthText.trimmingCharacters(in: .whitespaces)) {
+                            measurer.applyScaleCorrection(knownLengthMM: known)
+                        } else {
+                            measurer.errorMessage = "長さを数字で入れてください（例: 100）"
+                        }
+                    } label: {
+                        Label("この長さで合わせる", systemImage: "checkmark")
+                            .font(.footnote.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
+                }
+                Text("タップし直すと 2 点を置き直します")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private func metric(_ value: String, unit: String) -> some View {

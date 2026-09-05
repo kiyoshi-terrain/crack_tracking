@@ -32,6 +32,10 @@ final class MeasureViewModel: ObservableObject {
     @Published private(set) var strokesDisplay: [[Vec2]] = []
     /// 「全部測る」でフィルタが落とした本数
     @Published private(set) var rejectedCount = 0
+    /// 既知の長さの目印を置いている（タップが選択ではなく目印になる）
+    @Published var isPlacingScale = false
+    /// 目印の 2 点（表示座標）
+    @Published private(set) var scaleMarksDisplay: [Vec2] = []
 
     /// 「全部測る」の候補に掛けるフィルタ。なぞり計測には掛けない
     var filter = CandidateFilter.default
@@ -48,6 +52,8 @@ final class MeasureViewModel: ObservableObject {
         candidates = []
         strokesDisplay = []
         rejectedCount = 0
+        isPlacingScale = false
+        scaleMarksDisplay = []
         var notes: [String] = []
         if !still.isHighResolution {
             notes.append("高解像度フレームが取れず、ライブ映像で計測します（分解能が粗い）")
@@ -67,6 +73,98 @@ final class MeasureViewModel: ObservableObject {
         notices = []
         strokesDisplay = []
         rejectedCount = 0
+        isPlacingScale = false
+        scaleMarksDisplay = []
+    }
+
+    // MARK: - 縦尺補正（スケールバー）
+
+    /// 目印 2 点のあいだの、現在の縦尺で測った長さ（mm）
+    var scaleMarksMeasuredMM: Double? {
+        guard let still, scaleMarksDisplay.count == 2 else { return nil }
+        return still.surfaceDistanceMM(displayA: scaleMarksDisplay[0], displayB: scaleMarksDisplay[1])
+    }
+
+    func beginPlacingScale() {
+        isPlacingScale = true
+        scaleMarksDisplay = []
+    }
+
+    func cancelPlacingScale() {
+        isPlacingScale = false
+        scaleMarksDisplay = still?.scaleCorrection?.marksDisplay ?? []
+    }
+
+    /// 目印を置く。3 点目は置き直し（最初からやり直す）
+    func addScaleMark(_ point: Vec2) {
+        guard isPlacingScale else { return }
+        if scaleMarksDisplay.count >= 2 {
+            scaleMarksDisplay = [point]
+        } else {
+            scaleMarksDisplay.append(point)
+        }
+    }
+
+    /// 既知の長さで縦尺を合わせる。既に測った候補にも反映する。
+    ///
+    /// LiDAR の距離は 0.3m で 3〜10% 揺れる。幅は距離に比例するので、亀裂の横に
+    /// 置いた既知の長さ（100mm の目印など）で、この静止画の縦尺を決め直す。
+    @discardableResult
+    func applyScaleCorrection(knownLengthMM: Double) -> Bool {
+        guard let current = still, let measured = scaleMarksMeasuredMM,
+              let k = ScaleCorrection.factor(measuredMM: measured, knownMM: knownLengthMM) else {
+            errorMessage = "目印の 2 点と、実際の長さ（mm）を入れてください"
+            return false
+        }
+        // LiDAR の誤差は 10% 程度。2 倍も違えば目印か入力の間違い
+        guard k > 0.5, k < 2.0 else {
+            errorMessage = String(format: "倍率が %.2f になります。目印の 2 点か、長さの入力を確かめてください", k)
+            return false
+        }
+        let previous = current.scaleCorrection?.factor ?? 1
+        rescale(by: k)
+        still?.scaleCorrection = ScaleCorrectionState(
+            factor: previous * k,
+            knownMM: knownLengthMM,
+            measuredMM: measured / previous,
+            marksDisplay: scaleMarksDisplay
+        )
+        isPlacingScale = false
+        return true
+    }
+
+    /// 縦尺補正を外して LiDAR の縦尺に戻す。
+    func clearScaleCorrection() {
+        guard let factor = still?.scaleCorrection?.factor, factor > 0 else { return }
+        rescale(by: 1 / factor)
+        still?.scaleCorrection = nil
+        scaleMarksDisplay = []
+        isPlacingScale = false
+    }
+
+    /// 壁面を法線方向に k 倍の距離へ動かし、静止画・候補の縦尺を k 倍にする。
+    private func rescale(by k: Double) {
+        guard var s = still else { return }
+        let plane = ScaleCorrection.plane(s.estimate.plane, scaledBy: k)
+        s.estimate = DepthPlaneEstimator.Estimate(
+            plane: plane,
+            rmsResidual: s.estimate.rmsResidual,
+            sampleCount: s.estimate.sampleCount,
+            centerDistance: s.estimate.centerDistance * k
+        )
+        s.millimetersPerPixel *= k
+        s.distance *= k
+        still = s
+        candidates = candidates.map { c in
+            Candidate(
+                id: c.id,
+                measurement: c.measurement.scaled(by: k),
+                centerlineInImage: c.centerlineInImage,
+                centerlineDisplay: c.centerlineDisplay,
+                scale: SurfaceScale(intrinsics: c.scale.intrinsics, plane: plane),
+                isSelected: c.isSelected
+            )
+        }
     }
 
     func toggle(_ id: UUID) {
@@ -204,7 +302,8 @@ final class MeasureViewModel: ObservableObject {
                     label: String(format: "C-%03d", number),
                     measurement: candidate.measurement,
                     scale: candidate.scale,
-                    photoRelativePath: photoRelativePath
+                    photoRelativePath: photoRelativePath,
+                    scaleCorrection: still?.scaleCorrection?.factor
                 )
             )
             number += 1

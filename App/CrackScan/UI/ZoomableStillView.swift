@@ -24,6 +24,9 @@ struct ZoomableStillView: UIViewRepresentable {
     let lines: [StillOverlayLine]
     /// これまでになぞった線（案内として薄く描く）
     let guideStrokes: [[CGPoint]]
+    /// 縦尺合わせの目印（表示座標、0〜2 点）と、2 点間に出すラベル
+    var scaleMarks: [CGPoint] = []
+    var scaleLabel: String? = nil
     /// なぞり終わり。点列（表示 px）と、画面上の指の大きさに相当する半径（表示 px）
     let onStroke: (_ points: [CGPoint], _ radiusPx: CGFloat) -> Void
     /// タップ。位置（表示 px）と半径（表示 px）
@@ -43,7 +46,13 @@ struct ZoomableStillView: UIViewRepresentable {
         if view.canvas.image !== image {
             view.setImage(image)
         }
-        view.canvas.overlay.update(lines: lines, frameRect: frameRect, guideStrokes: guideStrokes)
+        view.canvas.overlay.update(
+            lines: lines,
+            frameRect: frameRect,
+            guideStrokes: guideStrokes,
+            scaleMarks: scaleMarks,
+            scaleLabel: scaleLabel
+        )
     }
 }
 
@@ -187,6 +196,8 @@ final class StillOverlayView: UIView {
     private(set) var lines: [StillOverlayLine] = []
     private(set) var frameRect: CGRect?
     private(set) var guideStrokes: [[CGPoint]] = []
+    private(set) var scaleMarks: [CGPoint] = []
+    private(set) var scaleLabel: String?
 
     var zoomScale: CGFloat = 1 {
         didSet { if abs(zoomScale - oldValue) > 1e-6 { render() } }
@@ -218,10 +229,18 @@ final class StillOverlayView: UIView {
         fatalError("init(coder:) is not supported")
     }
 
-    func update(lines: [StillOverlayLine], frameRect: CGRect?, guideStrokes: [[CGPoint]]) {
+    func update(
+        lines: [StillOverlayLine],
+        frameRect: CGRect?,
+        guideStrokes: [[CGPoint]],
+        scaleMarks: [CGPoint] = [],
+        scaleLabel: String? = nil
+    ) {
         self.lines = lines
         self.frameRect = frameRect
         self.guideStrokes = guideStrokes
+        self.scaleMarks = scaleMarks
+        self.scaleLabel = scaleLabel
         render()
     }
 
@@ -251,7 +270,6 @@ final class StillOverlayView: UIView {
             add(shape)
         }
 
-        let screenScale = UIScreen.main.scale
         for line in lines where line.points.count >= 2 {
             let shape = CAShapeLayer()
             shape.path = Self.path(line.points)
@@ -264,29 +282,72 @@ final class StillOverlayView: UIView {
 
             // ラベル（幅）。芯線の中ほどの右に置く
             let anchor = line.points[line.points.count / 2]
-            let fontSize = 13 / s
-            let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
-            let textSize = (line.label as NSString).size(withAttributes: [.font: font])
-            let pad = 5 / s
-            let text = CATextLayer()
-            text.string = line.label
-            text.font = font
-            text.fontSize = fontSize
-            text.foregroundColor = UIColor.white.cgColor
-            text.alignmentMode = .center
-            text.contentsScale = screenScale * s
-            text.backgroundColor = line.color.withAlphaComponent(line.isSelected ? 0.9 : 0.5).cgColor
-            text.cornerRadius = (textSize.height + pad * 2) / 2
-            text.frame = CGRect(
-                x: anchor.x + 10 / s,
-                y: anchor.y - textSize.height / 2 - pad,
-                width: textSize.width + pad * 2,
-                height: textSize.height + pad * 2
-            )
-            // 文字を縦方向の中央に置く（CATextLayer は上寄せ）
-            text.bounds = CGRect(x: 0, y: -pad, width: text.frame.width, height: text.frame.height)
-            add(text)
+            add(makeLabel(
+                line.label,
+                at: CGPoint(x: anchor.x + 10 / s, y: anchor.y),
+                background: line.color.withAlphaComponent(line.isSelected ? 0.9 : 0.5),
+                scale: s
+            ))
         }
+
+        // 縦尺合わせの目印（十字の丸）と、2 点を結ぶ線・長さ
+        let cyan = UIColor.systemCyan
+        for mark in scaleMarks {
+            let r = 9 / s
+            let ring = CAShapeLayer()
+            ring.path = UIBezierPath(ovalIn: CGRect(x: mark.x - r, y: mark.y - r, width: r * 2, height: r * 2)).cgPath
+            ring.strokeColor = cyan.cgColor
+            ring.fillColor = UIColor.clear.cgColor
+            ring.lineWidth = 2 / s
+            add(ring)
+            let cross = CAShapeLayer()
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: mark.x - r * 1.8, y: mark.y)); path.addLine(to: CGPoint(x: mark.x + r * 1.8, y: mark.y))
+            path.move(to: CGPoint(x: mark.x, y: mark.y - r * 1.8)); path.addLine(to: CGPoint(x: mark.x, y: mark.y + r * 1.8))
+            cross.path = path.cgPath
+            cross.strokeColor = cyan.cgColor
+            cross.lineWidth = 1 / s
+            add(cross)
+        }
+        if scaleMarks.count == 2 {
+            let link = CAShapeLayer()
+            link.path = Self.path(scaleMarks)
+            link.strokeColor = cyan.withAlphaComponent(0.9).cgColor
+            link.fillColor = UIColor.clear.cgColor
+            link.lineWidth = 2 / s
+            link.lineDashPattern = [NSNumber(value: Double(6 / s)), NSNumber(value: Double(4 / s))]
+            add(link)
+            if let scaleLabel {
+                let mid = CGPoint(x: (scaleMarks[0].x + scaleMarks[1].x) / 2, y: (scaleMarks[0].y + scaleMarks[1].y) / 2)
+                add(makeLabel(scaleLabel, at: CGPoint(x: mid.x + 10 / s, y: mid.y), background: cyan.withAlphaComponent(0.9), scale: s))
+            }
+        }
+    }
+
+    /// 角丸の背景付きラベル。文字はズームで割って画面上の大きさを一定にする
+    private func makeLabel(_ string: String, at anchor: CGPoint, background: UIColor, scale s: CGFloat) -> CATextLayer {
+        let fontSize = 13 / s
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+        let textSize = (string as NSString).size(withAttributes: [.font: font])
+        let pad = 5 / s
+        let text = CATextLayer()
+        text.string = string
+        text.font = font
+        text.fontSize = fontSize
+        text.foregroundColor = UIColor.white.cgColor
+        text.alignmentMode = .center
+        text.contentsScale = UIScreen.main.scale * s
+        text.backgroundColor = background.cgColor
+        text.cornerRadius = (textSize.height + pad * 2) / 2
+        text.frame = CGRect(
+            x: anchor.x,
+            y: anchor.y - textSize.height / 2 - pad,
+            width: textSize.width + pad * 2,
+            height: textSize.height + pad * 2
+        )
+        // 文字を縦方向の中央に置く（CATextLayer は上寄せ）
+        text.bounds = CGRect(x: 0, y: -pad, width: text.frame.width, height: text.frame.height)
+        return text
     }
 
     private func add(_ sublayer: CALayer) {
