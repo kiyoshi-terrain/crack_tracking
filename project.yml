@@ -39,6 +39,11 @@ targets:
         PRODUCT_NAME: CrackCore
         DEFINES_MODULE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
+        # フレームワークにも Info.plist が要る。無いと実機向けの署名で
+        # "CrackCore.framework did not contain an Info.plist" で止まる
+        # （署名を切っている CI のビルドでは通ってしまうので気づけない）。
+        # ファイルを置かずに Xcode に生成させる
+        GENERATE_INFOPLIST_FILE: YES
 
   CrackScan:
     type: application
