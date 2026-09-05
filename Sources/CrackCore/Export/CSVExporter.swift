@@ -11,7 +11,7 @@ public enum CSVExporter {
         rows.append([
             "案件名", "構造物名", "部材名", "亀裂番号", "計測日時",
             "最大幅(mm)", "平均幅(mm)", "延長(mm)", "区分",
-            "撮影距離(m)", "入射角(deg)", "分解能(mm/px)",
+            "撮影距離(m)", "入射角(deg)", "分解能(mm/px)", "縦尺補正",
             "分解能充足", "信頼度", "手入力幅(mm)", "備考",
         ])
 
@@ -34,6 +34,7 @@ public enum CSVExporter {
                     format(crack.distance, digits: 2),
                     format(crack.incidenceAngleDegrees, digits: 0),
                     format(crack.millimetersPerPixel, digits: 3),
+                    crack.scaleCorrection.map { format($0, digits: 3) } ?? "",
                     crack.isResolutionSufficient ? "○" : "×",
                     format(crack.confidence, digits: 2),
                     crack.manualWidthMM.map { format($0, digits: 2) } ?? "",
