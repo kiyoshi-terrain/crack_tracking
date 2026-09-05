@@ -158,8 +158,8 @@ public struct CrackDetector: Sendable {
     /// （線の端の外へは広げない）。
     ///
     /// 芯線が途中で切れていても、なぞった線上の区間が重ならない断片は同じ亀裂の
-    /// 続きとみなして 1 本にまとめる。区間が重なる断片（並走する斑点・目地）は
-    /// 長い方だけを採る。
+    /// 続きとみなして 1 本にまとめる。区間が重なる断片（並走する斑点・目地・
+    /// クラックスケールの隣の目盛り）は、なぞった線に近い方だけを採る。
     ///
     /// - Parameters:
     ///   - stroke: なぞった線（**原寸** px の点列）
@@ -198,25 +198,34 @@ public struct CrackDetector: Sendable {
         let polylines = PolylineTracer.trace(mask, options: options.tracing)
         guard !polylines.isEmpty else { return nil }
 
-        // 断片ごとに、なぞった線上の区間 [s0, s1] を出す
+        // 断片ごとに、なぞった線上の区間 [s0, s1] と、線からの平均距離を出す
         struct Piece {
             let polyline: [Vec2]
             let s0: Double
             let s1: Double
             let length: Double
+            let distance: Double
         }
         var pieces: [Piece] = polylines.map { polyline in
             let s = polyline.map { path.arcLength(nearestTo: $0) }
+            let d = polyline.map { path.distance(to: $0) }
             return Piece(
                 polyline: polyline,
                 s0: s.min() ?? 0,
                 s1: s.max() ?? 0,
-                length: PolylineTracer.polylineLength(polyline)
+                length: PolylineTracer.polylineLength(polyline),
+                distance: d.reduce(0, +) / Double(max(1, d.count))
             )
         }
-        pieces.sort { $0.length > $1.length }
+        // 採否は「なぞった線に近い順」。長さで選ぶと、回廊に一緒に入った平行な線
+        // （クラックスケールの隣の目盛り・並走する目地）のうち長い方が採られ、
+        // 指した線ではない方が出る。ただし短すぎる断片（斑点）が近いだけで採られないよう、
+        // 最長の 1/4 に満たないものは先に落とす
+        let longest = pieces.map(\.length).max() ?? 0
+        pieces = pieces.filter { $0.length >= longest * 0.25 }
+        pieces.sort { $0.distance < $1.distance }
 
-        // 長い順に、既に採った断片と区間が 2 割以上重ならないものだけ採る
+        // 近い順に、既に採った断片と区間が 2 割以上重ならないものだけ採る
         var accepted: [Piece] = []
         for piece in pieces {
             let span = max(piece.s1 - piece.s0, 1e-9)
