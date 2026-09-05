@@ -176,28 +176,26 @@ public struct CrackDetector: Sendable {
         guard path.length > 0 else { return nil }
         let radius = max(1.0, Double(searchRadiusPx) / Double(prepared.factor))
 
+        // なぞった線の近傍（区間の中）。しきい値はこの中の応答だけで決める。
+        // 画面全体のパーセンタイルだと、回廊の外にもっと強い構造（目地）があるときに
+        // 亀裂が種を持てず丸ごと消える（合成検証で実際に消えた）
+        let corridor = path.corridorMask(
+            width: prepared.enhanced.width,
+            height: prepared.enhanced.height,
+            radius: radius
+        )
+        guard corridor.trueCount > 0 else { return nil }
+
         let field = RidgeDetector.compute(
             prepared.enhanced,
             scales: prepared.detectionScales(options.ridgeScales),
             polarity: .brightLine
         )
-        var mask = RidgeThresholder.mask(from: field, options: options.threshold)
+        var mask = RidgeThresholder.mask(from: field, options: options.threshold, within: corridor)
         mask = Skeletonizer.thin(mask)
+        guard mask.trueCount > 0 else { return nil }
 
-        // なぞった線の近傍（区間の中）だけ残す
-        var corridor = BinaryMask(width: mask.width, height: mask.height)
-        var any = false
-        for y in 0..<mask.height {
-            for x in 0..<mask.width where mask[x, y] {
-                if path.containsInCorridor(Vec2(Double(x), Double(y)), radius: radius) {
-                    corridor[x, y] = true
-                    any = true
-                }
-            }
-        }
-        guard any else { return nil }
-
-        let polylines = PolylineTracer.trace(corridor, options: options.tracing)
+        let polylines = PolylineTracer.trace(mask, options: options.tracing)
         guard !polylines.isEmpty else { return nil }
 
         // 断片ごとに、なぞった線上の区間 [s0, s1] を出す

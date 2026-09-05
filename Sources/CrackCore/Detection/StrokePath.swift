@@ -44,6 +44,25 @@ struct StrokePath {
         return false
     }
 
+    /// なぞった区間の近傍（半径 radius）の 2 値マスク。外接矩形の中だけ調べる。
+    func corridorMask(width: Int, height: Int, radius: Double) -> BinaryMask {
+        var mask = BinaryMask(width: width, height: height)
+        guard points.count >= 2, width > 0, height > 0,
+              let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
+              let minY = points.map(\.y).min(), let maxY = points.map(\.y).max() else { return mask }
+        let x0 = max(0, Int((minX - radius).rounded(.down)))
+        let x1 = min(width - 1, Int((maxX + radius).rounded(.up)))
+        let y0 = max(0, Int((minY - radius).rounded(.down)))
+        let y1 = min(height - 1, Int((maxY + radius).rounded(.up)))
+        guard x1 >= x0, y1 >= y0 else { return mask }
+        for y in y0...y1 {
+            for x in x0...x1 where containsInCorridor(Vec2(Double(x), Double(y)), radius: radius) {
+                mask[x, y] = true
+            }
+        }
+        return mask
+    }
+
     /// 最も近い点までの距離（端はクランプ）
     func distance(to p: Vec2) -> Double {
         guard points.count >= 2 else { return points.first?.distance(to: p) ?? .infinity }
