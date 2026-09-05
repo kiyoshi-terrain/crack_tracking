@@ -14,6 +14,9 @@ public struct InspectionProject: Codable, Identifiable, Sendable, Hashable {
     public var targetCrackWidthMM: Double
     /// この案件に適用する区分しきい値（点検要領に合わせて差し替える）
     public var gradeThresholds: CrackGrade.Thresholds
+    /// 既知幅の線で合わせた幅の校正（PSF σ と一定の太り）。nil なら設計値のまま。
+    /// 端末・レンズ・撮り方で変わるので案件ごとに持つ
+    public var widthCalibration: WidthCalibration?
     public var sessions: [CaptureSession]
 
     public init(
@@ -26,6 +29,7 @@ public struct InspectionProject: Codable, Identifiable, Sendable, Hashable {
         note: String = "",
         targetCrackWidthMM: Double = 0.2,
         gradeThresholds: CrackGrade.Thresholds = .default,
+        widthCalibration: WidthCalibration? = nil,
         sessions: [CaptureSession] = []
     ) {
         self.id = id
@@ -37,6 +41,7 @@ public struct InspectionProject: Codable, Identifiable, Sendable, Hashable {
         self.note = note
         self.targetCrackWidthMM = targetCrackWidthMM
         self.gradeThresholds = gradeThresholds
+        self.widthCalibration = widthCalibration
         self.sessions = sessions
     }
 
@@ -125,6 +130,10 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
     public var manualWidthMM: Double?
     /// 既知の長さ（スケールバー）で合わせた縦尺の倍率。nil なら LiDAR の縦尺のまま
     public var scaleCorrection: Double?
+    /// 幅の校正に使った実効 PSF の σ（px）。nil なら校正していない（設計値）
+    public var widthCalibrationSigmaPx: Double?
+    /// 幅の校正で引いた一定の太り（px）
+    public var widthCalibrationOffsetPx: Double?
 
     public init(
         id: UUID = UUID(),
@@ -144,7 +153,9 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
         photoRelativePath: String? = nil,
         note: String = "",
         manualWidthMM: Double? = nil,
-        scaleCorrection: Double? = nil
+        scaleCorrection: Double? = nil,
+        widthCalibrationSigmaPx: Double? = nil,
+        widthCalibrationOffsetPx: Double? = nil
     ) {
         self.id = id
         self.label = label
@@ -164,6 +175,8 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
         self.note = note
         self.manualWidthMM = manualWidthMM
         self.scaleCorrection = scaleCorrection
+        self.widthCalibrationSigmaPx = widthCalibrationSigmaPx
+        self.widthCalibrationOffsetPx = widthCalibrationOffsetPx
     }
 
     /// 帳票に載せる幅（手入力があればそちらを優先）。
@@ -181,7 +194,8 @@ extension CrackRecord {
         measurement: CrackMeasurement,
         scale: SurfaceScale,
         photoRelativePath: String? = nil,
-        scaleCorrection: Double? = nil
+        scaleCorrection: Double? = nil,
+        widthCalibration: WidthCalibration? = nil
     ) {
         // 代表点は芯線の中央。撮影距離・入射角はここの値を記録する。
         let representative = measurement.centerline.isEmpty
@@ -202,7 +216,9 @@ extension CrackRecord {
             centerlinePixels: measurement.centerline,
             widthSamplesMM: measurement.samples.map(\.widthMM),
             photoRelativePath: photoRelativePath,
-            scaleCorrection: scaleCorrection
+            scaleCorrection: scaleCorrection,
+            widthCalibrationSigmaPx: widthCalibration?.psfSigmaPx,
+            widthCalibrationOffsetPx: widthCalibration?.offsetPx
         )
     }
 }

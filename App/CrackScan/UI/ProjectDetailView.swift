@@ -97,6 +97,29 @@ struct ProjectDetailView: View {
                     Text(String(format: "%.2f mm", width)).tag(width)
                 }
             }
+            // 幅校正は既知幅の線から解いた「幅の測り方」。撮影画面で合わせ、ここで確かめる
+            if let calibration = project.widthCalibration, calibration.isMeasured {
+                LabeledContent("幅校正") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(String(format: "σ %.2f px ／ %+.1f px", calibration.psfSigmaPx, calibration.offsetPx))
+                            .monospacedDigit()
+                        Text(String(
+                            format: "既知幅 %d 点%@",
+                            calibration.points.count,
+                            calibration.rmsResidualPx.map { String(format: "・残差 %.2f px", $0) } ?? ""
+                        ))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                // project の変更は onChange で保存される
+                Button("幅校正を消す", role: .destructive) {
+                    project.widthCalibration = nil
+                }
+                .font(.footnote)
+            } else {
+                LabeledContent("幅校正", value: "未校正（設計値 σ 0.8 px）")
+            }
             LabeledContent("ひび割れ", value: "\(project.allCracks.count) 本")
 
             let severe = project.allCracks.filter {
@@ -112,7 +135,7 @@ struct ProjectDetailView: View {
         } header: {
             Text("概要")
         } footer: {
-            Text("目標幅は「測りたい幅の級」です。撮影ガイドはこの幅を 3px 以上で撮れる距離を案内し、検出はこの幅の 0.8〜4 倍を狙います。石積みの開口なら 1〜3 mm、コンクリートのひび割れなら 0.2〜0.3 mm が目安です。")
+            Text("目標幅は「測りたい幅の級」です。撮影ガイドはこの幅を 3px 以上で撮れる距離を案内し、検出はこの幅の 0.8〜4 倍を狙います。石積みの開口なら 1〜3 mm、コンクリートのひび割れなら 0.2〜0.3 mm が目安です。\n幅校正は、クラックスケールなど既知幅の線を計測画面でなぞって「幅校正」から合わせます。太い線と細い線の 2 通りを入れると、ボケ（σ）と一定の太りを分けて決められます。")
         }
     }
 

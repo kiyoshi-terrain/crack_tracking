@@ -75,6 +75,11 @@ struct CaptureView: View {
                 onRetake: {
                     isReviewing = false
                     measurer.clear()
+                },
+                onCalibrate: { calibration in
+                    // 幅校正は端末・レンズの性質なので案件に残す（次の撮影から効く）
+                    project.widthCalibration = calibration
+                    store.save(project)
                 }
             )
         }
@@ -243,6 +248,7 @@ struct CaptureView: View {
         isCapturing = true
         defer { isCapturing = false }
         measurer.clear()
+        measurer.useCalibration(project.widthCalibration)
         guard let still = await controller.captureStill() else { return }
         measurer.begin(still: still)
         isReviewing = true
