@@ -13,15 +13,13 @@ actor CrackMeasurementService {
         /// `image` に対応する内部パラメータ
         let intrinsics: CameraIntrinsics
         let plane: Plane
-        /// 元画像に対する切り出しオフセット（結果を画面座標に戻すのに使う）
+        /// 元画像に対する切り出しオフセット（結果を元画像座標に戻すのに使う）
         let cropOrigin: Vec2
     }
 
     struct Output: Sendable {
         let measurements: [CrackMeasurement]
         let scale: SurfaceScale
-        /// 元画像座標に戻した芯線
-        let centerlinesInSourceImage: [[Vec2]]
         /// 検出に使った縮小率
         let detectionFactor: Int
     }
@@ -36,28 +34,27 @@ actor CrackMeasurementService {
         detector = CrackDetector(options: options)
     }
 
-    /// 領域内のひび割れをすべて検出する。
+    /// 領域内のひび割れをすべて検出する。芯線は切り出し座標。
     func detectAll(_ input: Input) -> Output {
         let scale = SurfaceScale(intrinsics: input.intrinsics, plane: input.plane)
         let result = detector.detect(in: input.image, scale: scale)
         return Output(
             measurements: result.measurements,
             scale: scale,
-            centerlinesInSourceImage: result.measurements.map { m in
-                m.centerline.map { $0 + input.cropOrigin }
-            },
             detectionFactor: result.detectionFactor
         )
     }
 
-    /// 指定点の1本だけを計測する。
+    /// なぞった線に沿う 1 本だけを測る。
     ///
-    /// - Parameter searchRadiusPx: 元画像 px での探索半径
-    func measureOne(_ input: Input, at point: Vec2, searchRadiusPx: Int) -> CrackMeasurement? {
+    /// - Parameters:
+    ///   - stroke: 元画像 px の点列
+    ///   - searchRadiusPx: 元画像 px での探索半径
+    func measureAlong(_ input: Input, stroke: [Vec2], searchRadiusPx: Int) -> CrackMeasurement? {
         let scale = SurfaceScale(intrinsics: input.intrinsics, plane: input.plane)
-        return detector.measureCrack(
+        return detector.measureAlong(
             in: input.image,
-            near: point - input.cropOrigin,
+            stroke: stroke.map { $0 - input.cropOrigin },
             scale: scale,
             searchRadiusPx: searchRadiusPx
         )
@@ -74,20 +71,31 @@ enum MeasurementInputBuilder {
     /// 通常はここに掛からない。ビューポートが未確定のまま呼ばれたときの保険。
     static let hardLimitSide = 4200
 
-    /// 解析範囲を切り出して解析入力を作る。
+    /// 正規化矩形で指定した範囲を切り出す。
     static func build(
         frame: ARFrame,
         normalizedRegion: CGRect,
         plane: Plane
     ) -> CrackMeasurementService.Input? {
         let intrinsics = DepthPlaneEstimator.cameraIntrinsics(frame: frame)
-
-        var rect = PixelRect(
+        let rect = PixelRect(
             x: Int(normalizedRegion.minX * CGFloat(intrinsics.imageWidth)),
             y: Int(normalizedRegion.minY * CGFloat(intrinsics.imageHeight)),
             width: Int(normalizedRegion.width * CGFloat(intrinsics.imageWidth)),
             height: Int(normalizedRegion.height * CGFloat(intrinsics.imageHeight))
-        ).clamped(toWidth: intrinsics.imageWidth, height: intrinsics.imageHeight)
+        )
+        return build(frame: frame, pixelRect: rect, plane: plane)
+    }
+
+    /// 画素矩形で指定した範囲を切り出す（画像の外ははみ出しをクランプ）。
+    static func build(
+        frame: ARFrame,
+        pixelRect: PixelRect,
+        plane: Plane
+    ) -> CrackMeasurementService.Input? {
+        let intrinsics = DepthPlaneEstimator.cameraIntrinsics(frame: frame)
+
+        var rect = pixelRect.clamped(toWidth: intrinsics.imageWidth, height: intrinsics.imageHeight)
         rect = AnalysisPlanner.clampRegion(rect, maxSide: hardLimitSide)
 
         guard rect.width > 32, rect.height > 32,

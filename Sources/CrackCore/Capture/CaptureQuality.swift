@@ -18,6 +18,8 @@ public struct CaptureConditions: Sendable {
     public var planeResidual: Double
     /// ARKit のトラッキングが安定しているか
     public var isTrackingStable: Bool
+    /// カメラの動き（°/s）。回転と、距離で割った並進の大きい方。手持ちの自然な揺れは 1〜3
+    public var angularSpeedDegPerSec: Double
 
     public init(
         distance: Double,
@@ -27,7 +29,8 @@ public struct CaptureConditions: Sendable {
         meanLuminance: Double,
         saturatedRatio: Double,
         planeResidual: Double,
-        isTrackingStable: Bool
+        isTrackingStable: Bool,
+        angularSpeedDegPerSec: Double = 0
     ) {
         self.distance = distance
         self.incidenceAngleDegrees = incidenceAngleDegrees
@@ -37,6 +40,7 @@ public struct CaptureConditions: Sendable {
         self.saturatedRatio = saturatedRatio
         self.planeResidual = planeResidual
         self.isTrackingStable = isTrackingStable
+        self.angularSpeedDegPerSec = angularSpeedDegPerSec
     }
 }
 
@@ -94,6 +98,10 @@ public struct CaptureQualityEvaluator: Sendable {
         public var maxLuminance: Double
         public var maxSaturatedRatio: Double
         public var maxPlaneResidual: Double
+        /// これより速く動いていたら「止めて」と言う（°/s）。手持ちの揺れは超えない
+        public var maxAngularSpeedDegPerSec: Double
+        /// 計測の直前に「静止した」とみなす動きの上限（°/s）
+        public var stillnessDegPerSec: Double
 
         public init(
             targetCrackWidthMM: Double = 0.2,
@@ -105,7 +113,9 @@ public struct CaptureQualityEvaluator: Sendable {
             minLuminance: Double = 0.12,
             maxLuminance: Double = 0.88,
             maxSaturatedRatio: Double = 0.08,
-            maxPlaneResidual: Double = 0.02
+            maxPlaneResidual: Double = 0.02,
+            maxAngularSpeedDegPerSec: Double = 12,
+            stillnessDegPerSec: Double = 6
         ) {
             self.targetCrackWidthMM = targetCrackWidthMM
             self.minDistance = minDistance
@@ -117,6 +127,8 @@ public struct CaptureQualityEvaluator: Sendable {
             self.maxLuminance = maxLuminance
             self.maxSaturatedRatio = maxSaturatedRatio
             self.maxPlaneResidual = maxPlaneResidual
+            self.maxAngularSpeedDegPerSec = maxAngularSpeedDegPerSec
+            self.stillnessDegPerSec = stillnessDegPerSec
         }
 
         public static let `default` = Thresholds()
@@ -222,6 +234,16 @@ public struct CaptureQualityEvaluator: Sendable {
                 id: "bright",
                 level: .warning,
                 message: "白飛びしています。露出を下げるか角度を変えてください"
+            ))
+        }
+
+        // 手ブレ: 動いている間に撮ると断面がボケて幅が太く出る（PSF 補正は 0.8px を仮定）。
+        // 計測の直前は静止を待つが、ずっと動いているなら人に止めてもらう
+        if c.angularSpeedDegPerSec > thresholds.maxAngularSpeedDegPerSec {
+            issues.append(.init(
+                id: "motion",
+                level: .warning,
+                message: String(format: "動いています（%.0f°/s）。止めてから計測してください", c.angularSpeedDegPerSec)
             ))
         }
 

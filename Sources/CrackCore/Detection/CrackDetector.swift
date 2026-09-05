@@ -150,6 +150,101 @@ public struct CrackDetector: Sendable {
         }
     }
 
+    /// なぞった線に沿うひび割れ 1 本を測る（オペレータが対象を線で指定するモード）。
+    ///
+    /// 「枠内を全部測る」は暗くて細長いものを全部拾う（目地・斑点・影の縁）。
+    /// 現場で欲しいのは「この亀裂のこの区間の幅」なので、画面でなぞった線から
+    /// `searchRadiusPx` 以内にある芯線だけを対象にし、**なぞった区間に限って**測る
+    /// （線の端の外へは広げない）。
+    ///
+    /// 芯線が途中で切れていても、なぞった線上の区間が重ならない断片は同じ亀裂の
+    /// 続きとみなして 1 本にまとめる。区間が重なる断片（並走する斑点・目地）は
+    /// 長い方だけを採る。
+    ///
+    /// - Parameters:
+    ///   - stroke: なぞった線（**原寸** px の点列）
+    ///   - searchRadiusPx: 線からこの距離（**原寸** px）以内の芯線だけを対象にする
+    public func measureAlong(
+        in image: GrayImage,
+        stroke: [Vec2],
+        scale: SurfaceScale,
+        searchRadiusPx: Int
+    ) -> CrackMeasurement? {
+        guard stroke.count >= 2 else { return nil }
+        let prepared = prepare(image)
+        let path = StrokePath(points: stroke.map(prepared.toDetection))
+        guard path.length > 0 else { return nil }
+        let radius = max(1.0, Double(searchRadiusPx) / Double(prepared.factor))
+
+        let field = RidgeDetector.compute(
+            prepared.enhanced,
+            scales: prepared.detectionScales(options.ridgeScales),
+            polarity: .brightLine
+        )
+        var mask = RidgeThresholder.mask(from: field, options: options.threshold)
+        mask = Skeletonizer.thin(mask)
+
+        // なぞった線の近傍（区間の中）だけ残す
+        var corridor = BinaryMask(width: mask.width, height: mask.height)
+        var any = false
+        for y in 0..<mask.height {
+            for x in 0..<mask.width where mask[x, y] {
+                if path.containsInCorridor(Vec2(Double(x), Double(y)), radius: radius) {
+                    corridor[x, y] = true
+                    any = true
+                }
+            }
+        }
+        guard any else { return nil }
+
+        let polylines = PolylineTracer.trace(corridor, options: options.tracing)
+        guard !polylines.isEmpty else { return nil }
+
+        // 断片ごとに、なぞった線上の区間 [s0, s1] を出す
+        struct Piece {
+            let polyline: [Vec2]
+            let s0: Double
+            let s1: Double
+            let length: Double
+        }
+        var pieces: [Piece] = polylines.map { polyline in
+            let s = polyline.map { path.arcLength(nearestTo: $0) }
+            return Piece(
+                polyline: polyline,
+                s0: s.min() ?? 0,
+                s1: s.max() ?? 0,
+                length: PolylineTracer.polylineLength(polyline)
+            )
+        }
+        pieces.sort { $0.length > $1.length }
+
+        // 長い順に、既に採った断片と区間が 2 割以上重ならないものだけ採る
+        var accepted: [Piece] = []
+        for piece in pieces {
+            let span = max(piece.s1 - piece.s0, 1e-9)
+            var overlap = 0.0
+            for a in accepted {
+                overlap += max(0, min(piece.s1, a.s1) - max(piece.s0, a.s0))
+            }
+            if accepted.isEmpty || overlap / span < 0.2 {
+                accepted.append(piece)
+            }
+        }
+        accepted.sort { $0.s0 < $1.s0 }
+
+        let estimator = WidthEstimator(options: options.width)
+        let parts = accepted.compactMap { piece -> CrackMeasurement? in
+            let hint = widthHint(for: piece.polyline, field: field) * Double(prepared.factor)
+            return estimator.measure(
+                image: prepared.luminance,
+                centerline: piece.polyline.map(prepared.toFullResolution),
+                scale: scale,
+                expectedWidthHint: hint
+            )
+        }
+        return CrackMeasurement.merging(parts, maxWidthPercentile: options.width.maxWidthPercentile)
+    }
+
     // MARK: - 内部
 
     struct Prepared {
@@ -240,5 +335,36 @@ public struct CrackDetector: Sendable {
 
     func minDistance(from point: Vec2, to polyline: [Vec2]) -> Double {
         polyline.map { $0.distance(to: point) }.min() ?? .infinity
+    }
+}
+
+extension CrackMeasurement {
+    /// 同じ亀裂の断片（なぞった線に沿って途切れた芯線）を 1 本にまとめる。
+    ///
+    /// 芯線は断片を順に連結し、測点は全部合わせて代表値を取り直す。
+    static func merging(_ parts: [CrackMeasurement], maxWidthPercentile: Double) -> CrackMeasurement? {
+        guard let first = parts.first else { return nil }
+        if parts.count == 1 { return first }
+        let samples = parts.flatMap(\.samples)
+        guard samples.count >= 2 else { return nil }
+
+        let widths = samples.map(\.widthMM).sorted()
+        let maxIndex = min(widths.count - 1, Int((Double(widths.count - 1) * maxWidthPercentile).rounded()))
+        let maxWidth = widths[maxIndex]
+        let meanWidth = widths.reduce(0, +) / Double(widths.count)
+        let meanMMPerPx = samples.map(\.millimetersPerPixel).reduce(0, +) / Double(samples.count)
+        let meanConfidence = samples.map(\.confidence).reduce(0, +) / Double(samples.count)
+        let sufficient = maxWidth >= meanMMPerPx * CaptureAdvisor.defaultMinimumPixelsAcrossCrack
+
+        return CrackMeasurement(
+            centerline: parts.flatMap(\.centerline),
+            samples: samples,
+            lengthMM: parts.map(\.lengthMM).reduce(0, +),
+            maxWidthMM: maxWidth,
+            meanWidthMM: meanWidth,
+            millimetersPerPixel: meanMMPerPx,
+            isResolutionSufficient: sufficient,
+            confidence: sufficient ? meanConfidence : meanConfidence * 0.5
+        )
     }
 }

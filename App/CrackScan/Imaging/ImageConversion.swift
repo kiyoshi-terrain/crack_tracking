@@ -1,9 +1,41 @@
+import CoreImage
 import CoreVideo
 import Foundation
+import UIKit
 import CrackCore
 
 /// CVPixelBuffer / CGImage と `GrayImage` の相互変換。
 public enum ImageConversion {
+
+    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    /// 画面の向きに合わせて、キャプチャ画像（常に横長）を何回 90° 時計回りに回すか。
+    ///
+    /// ARKit の画像は「ホームボタン右の横持ち」で正立する。縦持ちは 90° 時計回り。
+    static func quarterTurnsClockwise(for orientation: UIInterfaceOrientation) -> Int {
+        switch orientation {
+        case .landscapeRight: return 0
+        case .landscapeLeft: return 2
+        case .portraitUpsideDown: return 3
+        default: return 1
+        }
+    }
+
+    /// 表示用の CGImage。`quarterTurnsClockwise` だけ 90° 時計回りに回した画素データを作る
+    /// （UIImage の orientation に頼らず実際に回す。なぞった座標を元画像へ戻す写像を
+    /// `RotatedImageMapping` の一箇所に集めるため）。
+    static func cgImage(from pixelBuffer: CVPixelBuffer, quarterTurnsClockwise: Int) -> CGImage? {
+        var image = CIImage(cvPixelBuffer: pixelBuffer)
+        let orientation: CGImagePropertyOrientation
+        switch ((quarterTurnsClockwise % 4) + 4) % 4 {
+        case 1: orientation = .right
+        case 2: orientation = .down
+        case 3: orientation = .left
+        default: orientation = .up
+        }
+        image = image.oriented(orientation)
+        return ciContext.createCGImage(image, from: image.extent)
+    }
 
     /// sRGB の逆ガンマ（8bit → 線形光）のルックアップテーブル。
     ///
