@@ -112,6 +112,17 @@ final class ProjectStore: ObservableObject {
         }
     }
 
+    /// セッションのフォルダ（写真・深度・メタ・3D モデル）を消す。無ければ何もしない。
+    func deleteSessionFiles(_ session: CaptureSession, in project: InspectionProject) {
+        let url = directory(for: session, in: project)
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        do {
+            try fileManager.removeItem(at: url)
+        } catch {
+            lastError = "セッションのフォルダを削除できませんでした: \(error.localizedDescription)"
+        }
+    }
+
     /// 撮影セッション用のフォルダを用意する。
     func prepareSessionDirectory(session: CaptureSession, in project: InspectionProject) throws -> URL {
         let url = directory(for: session, in: project)
