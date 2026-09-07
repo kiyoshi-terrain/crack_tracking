@@ -6,7 +6,7 @@
 //
 // 更新方法: ファイルを変えたら CACHE の版を上げる。
 
-const CACHE = 'sigma-tool-v29';
+const CACHE = 'sigma-tool-v30';
 
 // src/ 配下のモジュールは**全部**並べること。1本でも漏れると、
 // 圏外でその機能だけ静かに動かなくなる（targets.js が実際に漏れていた）。
@@ -79,7 +79,8 @@ self.addEventListener('activate', (event) => {
 // 古いモジュールに無くて起動時に即死する（実機で実際に起きた）。
 // 更新は新しい sw.js（CACHE の版が違う）の install で一式を取り直し、activate で
 // 旧キャッシュを消す。ページ側は controllerchange を受けて一度だけ再読み込みする。
-// シェル以外（画像など）はネットワーク優先・失敗時キャッシュ。
+// シェル以外（印刷シートなど）も**一度取ったらキャッシュから返す**。だから
+// シートを直しただけでも版を上げないと、印刷し直しても古い紙が出る。
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;

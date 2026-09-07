@@ -88,9 +88,9 @@ final class MeasureViewModel: ObservableObject {
         self.calibration = calibration ?? .default
     }
 
-    // MARK: - 縦尺補正（スケールバー）
+    // MARK: - 縮尺補正（スケールバー）
 
-    /// 目印 2 点のあいだの、現在の縦尺で測った長さ（mm）
+    /// 目印 2 点のあいだの、現在の縮尺で測った長さ（mm）
     var scaleMarksMeasuredMM: Double? {
         guard let still, scaleMarksDisplay.count == 2 else { return nil }
         return still.surfaceDistanceMM(displayA: scaleMarksDisplay[0], displayB: scaleMarksDisplay[1])
@@ -117,10 +117,10 @@ final class MeasureViewModel: ObservableObject {
         }
     }
 
-    /// 既知の長さで縦尺を合わせる。既に測った候補にも反映する。
+    /// 既知の長さで縮尺を合わせる。既に測った候補にも反映する。
     ///
     /// LiDAR の距離は 0.3m で 3〜10% 揺れる。幅は距離に比例するので、亀裂の横に
-    /// 置いた既知の長さ（100mm の目印など）で、この静止画の縦尺を決め直す。
+    /// 置いた既知の長さ（100mm の目印など）で、この静止画の縮尺を決め直す。
     @discardableResult
     func applyScaleCorrection(knownLengthMM: Double) -> Bool {
         guard let current = still, let measured = scaleMarksMeasuredMM,
@@ -145,7 +145,7 @@ final class MeasureViewModel: ObservableObject {
         return true
     }
 
-    /// 縦尺補正を外して LiDAR の縦尺に戻す。
+    /// 縮尺補正を外して LiDAR の縮尺に戻す。
     func clearScaleCorrection() {
         guard let factor = still?.scaleCorrection?.factor, factor > 0 else { return }
         rescale(by: 1 / factor)
@@ -154,7 +154,7 @@ final class MeasureViewModel: ObservableObject {
         isPlacingScale = false
     }
 
-    /// 壁面を法線方向に k 倍の距離へ動かし、静止画・候補の縦尺を k 倍にする。
+    /// 壁面を法線方向に k 倍の距離へ動かし、静止画・候補の縮尺を k 倍にする。
     private func rescale(by k: Double) {
         guard var s = still else { return }
         let plane = ScaleCorrection.plane(s.estimate.plane, scaledBy: k)
@@ -202,8 +202,8 @@ final class MeasureViewModel: ObservableObject {
 
     /// 選んでいる線の実幅を教えて、幅の測り方（PSF σ と一定の太り）を合わせる。
     ///
-    /// 幅の px は縦尺に依らないが、既知幅を px に直すのに mm/px が要る。
-    /// **先に縦尺を合わせてから**行う。
+    /// 幅の px は縮尺に依らないが、既知幅を px に直すのに mm/px が要る。
+    /// **先に縮尺を合わせてから**行う。
     @discardableResult
     func applyWidthCalibration(knownWidthMM: Double) -> WidthCalibration? {
         guard let target = calibrationTarget else {

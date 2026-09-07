@@ -128,7 +128,7 @@ public struct CrackRecord: Codable, Identifiable, Sendable, Hashable {
     public var note: String
     /// 手入力で上書きした場合の値（クラックスケールで実測した値など）
     public var manualWidthMM: Double?
-    /// 既知の長さ（スケールバー）で合わせた縦尺の倍率。nil なら LiDAR の縦尺のまま
+    /// 既知の長さ（スケールバー）で合わせた縮尺の倍率。nil なら LiDAR の縮尺のまま
     public var scaleCorrection: Double?
     /// 幅の校正に使った実効 PSF の σ（px）。nil なら校正していない（設計値）
     public var widthCalibrationSigmaPx: Double?

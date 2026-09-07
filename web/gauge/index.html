@@ -121,8 +121,9 @@
 
     <div class="callout">
       <strong>必ず原寸（100%）で印刷してください。</strong>
-      プリンタの既定は「用紙に合わせる」で約 96% に縮みます。印刷後、上部のスケールバーを
-      定規で測って <span class="mono">100.0mm</span> であることを確認してください。
+      プリンタの既定は「用紙に合わせる」で約 96% に縮みます。印刷後、上部の
+      <strong>左右の十字の交点どうし</strong>を定規で測って <span class="mono">100.0mm</span>
+      であることを確認してください。
     </div>
 
     <p class="eyebrow">手順</p>
@@ -130,11 +131,16 @@
       <li>印刷して、<em>平らな壁</em>にテープで貼る。LiDAR は壁を平面として取るので、机に置くより壁に貼る方が現地に近い。</li>
       <li>CrackScan で案件を作り、<em>目標幅を測りたい線の級</em>に合わせる。検出はその幅の 0.8〜4 倍を狙うので、
         0.3 mm なら 0.3〜1.0 の線、1 mm なら 0.8〜3 の線、3 mm なら 3〜5 の線が対象になる。</li>
-      <li>0.3〜0.5 m まで寄り、HUD の分解能が緑になったら線を<em>タップ</em>（1 本だけ測る）か「計測」（枠内を全部）。</li>
+      <li>0.27〜0.30 m まで寄って「計測」。静止画が出たら、<em>先に「縮尺」</em>でシート上部の十字 2 点に
+        画面中央の照準を合わせて「ここに置く」を 2 回。
+        <code>100</code> と入れて「この長さで合わせる」。LiDAR の縮尺は 0.3 m で 3〜10% 揺れるので、これで固定する。</li>
+      <li>測りたい線を<em>1 本指でなぞる</em>（2 本指は移動・ピンチは拡大）。枠の中をまとめて見たいときは「枠内を全部測る」。</li>
       <li>チップの値と下の表を比べる。0.3 m・48MP なら <em>±0.05 mm</em> 程度に収まるのが目安。</li>
       <li>くさび（幅が連続して変わる線）を測り、詳細画面の「幅の分布」が片側へ滑らかに増えることを見る。</li>
-      <li>一貫して太く（細く）出るなら、<code>WidthEstimator.Options.psfSigmaPx</code>（既定 0.8）を
-        <a href="https://github.com/kiyoshi-terrain/crack_tracking/blob/main/docs/accuracy.md">docs/accuracy.md §8</a> の手順で校正する。</li>
+      <li>一貫して太く（細く）出るなら、<strong>クラックスケールの既知幅の目盛り</strong>をなぞって「幅校正」で合わせる。
+        太い線と細い線の 2 通りを入れると、ボケ（σ）と一定の太りが分かれて決まる
+        （<a href="https://github.com/kiyoshi-terrain/crack_tracking/blob/main/docs/accuracy.md">docs/accuracy.md §8</a>）。
+        印刷した線は太りが乗るので、校正の既知幅には使わない。</li>
     </ol>
 
     <p class="eyebrow">線の幅</p>
@@ -168,23 +174,15 @@
         <text x="105" y="21.5" font-family="sans-serif" font-size="3"
               text-anchor="middle" fill="#444">A4 原寸印刷／CrackScan 検証用／線幅は設計値（印刷で 0.03〜0.05mm 太る）</text>
 
-        <!-- 印刷倍率の検証 -->
-        <g stroke="#000" stroke-width="0.4">
-          <line x1="55" y1="32" x2="155" y2="32"/>
-          <line x1="55" y1="29" x2="55" y2="35"/>
-          <line x1="155" y1="29" x2="155" y2="35"/>
-          <line x1="65" y1="30.5" x2="65" y2="33.5"/>
-          <line x1="75" y1="30.5" x2="75" y2="33.5"/>
-          <line x1="85" y1="30.5" x2="85" y2="33.5"/>
-          <line x1="95" y1="30.5" x2="95" y2="33.5"/>
-          <line x1="105" y1="30" x2="105" y2="34"/>
-          <line x1="115" y1="30.5" x2="115" y2="33.5"/>
-          <line x1="125" y1="30.5" x2="125" y2="33.5"/>
-          <line x1="135" y1="30.5" x2="135" y2="33.5"/>
-          <line x1="145" y1="30.5" x2="145" y2="33.5"/>
+        <!-- 100mm の基準。印刷倍率の確認と、CrackScan の「縮尺」で狙う目印を兼ねる。
+             狙う点を細い十字の交点にしてある（太い線・目盛りは端がどこか決まらない）。 -->
+        <g stroke="#000" stroke-width="0.15">
+          <line x1="49" y1="32" x2="161" y2="32"/>
+          <line x1="55" y1="27" x2="55" y2="37"/>
+          <line x1="155" y1="27" x2="155" y2="37"/>
         </g>
-        <text x="105" y="39.5" font-family="sans-serif" font-size="2.9"
-              text-anchor="middle" fill="#000">この線が 100.0mm なら印刷倍率OK（10mm刻み）。CrackScan の「延長」の検証にも使える</text>
+        <text x="105" y="41" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#000">左右の十字の交点どうしが 100.0mm（定規で確認）。CrackScan の「縮尺」はこの 2 点に照準を合わせる</text>
 
         <!-- 上段: 0.3 / 0.5 / 0.8 / 1.0 / 1.5 mm（線の中心は x = 30, 67.5, 105, 142.5, 180） -->
         <text x="105" y="52" font-family="sans-serif" font-size="3.2" font-weight="bold"

@@ -1,7 +1,7 @@
 import XCTest
 @testable import CrackCore
 
-/// 既知の長さで縦尺を合わせる。
+/// 既知の長さで縮尺を合わせる。
 final class ScaleCorrectionTests: XCTestCase {
 
     /// 平面を法線方向に k 倍動かすと、面上の距離はすべて k 倍になる（斜めの面でも）。
@@ -36,7 +36,7 @@ final class ScaleCorrectionTests: XCTestCase {
     }
 
     func testFactorFromKnownLength() {
-        // LiDAR の縦尺で 97.2mm と測れた目印が実際は 100mm → 1.0288 倍
+        // LiDAR の縮尺で 97.2mm と測れた目印が実際は 100mm → 1.0288 倍
         XCTAssertEqual(try XCTUnwrap(ScaleCorrection.factor(measuredMM: 97.2, knownMM: 100)), 1.0288, accuracy: 1e-4)
         XCTAssertNil(ScaleCorrection.factor(measuredMM: 0, knownMM: 100))
         XCTAssertNil(ScaleCorrection.factor(measuredMM: 50, knownMM: -1))
@@ -70,7 +70,7 @@ final class ScaleCorrectionTests: XCTestCase {
         XCTAssertEqual(m.scaled(by: 0).maxWidthMM, m.maxWidthMM)
     }
 
-    /// 記録に縦尺補正の倍率が残り、無い古い記録も読める。
+    /// 記録に縮尺補正の倍率が残り、無い古い記録も読める。
     func testCrackRecordCarriesScaleCorrectionAndDecodesWithoutIt() throws {
         var record = CrackRecord(
             label: "C-001", maxWidthMM: 1.0, meanWidthMM: 0.9, lengthMM: 50,
