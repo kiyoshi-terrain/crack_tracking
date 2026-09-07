@@ -24,7 +24,7 @@ struct ZoomableStillView: UIViewRepresentable {
     let lines: [StillOverlayLine]
     /// これまでになぞった線（案内として薄く描く）
     let guideStrokes: [[CGPoint]]
-    /// 縦尺合わせの目印（表示座標、0〜2 点）と、2 点間に出すラベル
+    /// 縮尺合わせの目印（表示座標、0〜2 点）と、2 点間に出すラベル
     var scaleMarks: [CGPoint] = []
     var scaleLabel: String? = nil
     /// なぞり終わり。点列（表示 px）と、画面上の指の大きさに相当する半径（表示 px）
@@ -290,7 +290,7 @@ final class StillOverlayView: UIView {
             ))
         }
 
-        // 縦尺合わせの目印（十字の丸）と、2 点を結ぶ線・長さ
+        // 縮尺合わせの目印（十字の丸）と、2 点を結ぶ線・長さ
         let cyan = UIColor.systemCyan
         for mark in scaleMarks {
             let r = 9 / s

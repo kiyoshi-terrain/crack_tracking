@@ -16,7 +16,7 @@ struct StillReviewView: View {
     /// 幅校正が変わった（案件に保存してもらう。nil は校正なしに戻す）
     let onCalibrate: (WidthCalibration?) -> Void
 
-    /// 縦尺合わせに入力する既知の長さ（mm）
+    /// 縮尺合わせに入力する既知の長さ（mm）
     @State private var knownLengthText = "100"
     /// 幅校正に入力する既知の幅（mm）
     @State private var knownWidthText = "0.50"
@@ -86,11 +86,11 @@ struct StillReviewView: View {
         } message: {
             Text(measurer.errorMessage ?? "")
         }
-        .confirmationDialog("縦尺補正を外しますか？", isPresented: $isConfirmingClearScale, titleVisibility: .visible) {
-            Button("LiDAR の縦尺に戻す", role: .destructive) { measurer.clearScaleCorrection() }
+        .confirmationDialog("縮尺補正を外しますか？", isPresented: $isConfirmingClearScale, titleVisibility: .visible) {
+            Button("LiDAR の縮尺に戻す", role: .destructive) { measurer.clearScaleCorrection() }
             Button("キャンセル", role: .cancel) {}
         } message: {
-            Text("測った候補の幅・延長も LiDAR の縦尺に戻ります")
+            Text("測った候補の幅・延長も LiDAR の縮尺に戻ります")
         }
         .confirmationDialog("幅校正を外しますか？", isPresented: $isConfirmingClearCalibration, titleVisibility: .visible) {
             Button("設計値に戻す", role: .destructive) {
@@ -148,7 +148,7 @@ struct StillReviewView: View {
                     measurer.beginPlacingScale()
                 }
             } label: {
-                Label(measurer.isPlacingScale ? "やめる" : "縦尺", systemImage: "ruler")
+                Label(measurer.isPlacingScale ? "やめる" : "縮尺", systemImage: "ruler")
                     .font(.footnote.weight(.semibold))
             }
             .buttonStyle(.bordered)
@@ -184,7 +184,7 @@ struct StillReviewView: View {
         }
     }
 
-    /// 縦尺合わせの操作（目印を置いている間だけ出す）
+    /// 縮尺合わせの操作（目印を置いている間だけ出す）
     private var scalePanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             if measurer.scaleMarksDisplay.count < 2 {
@@ -198,7 +198,7 @@ struct StillReviewView: View {
                 .fixedSize(horizontal: false, vertical: true)
             } else {
                 if let measured = measurer.scaleMarksMeasuredMM {
-                    Text(String(format: "LiDAR の縦尺では %.1f mm。実際の長さを入れてください", measured))
+                    Text(String(format: "LiDAR の縮尺では %.1f mm。実際の長さを入れてください", measured))
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -275,7 +275,7 @@ struct StillReviewView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.mint)
             }
-            Text("先に「縦尺」を合わせてください（既知幅を px に直すのに分解能を使います）。"
+            Text("先に「縮尺」を合わせてください（既知幅を px に直すのに分解能を使います）。"
                 + "太い線と細い線の 2 通りを入れると、ボケ（σ）と一定の太りを分けて決められます")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

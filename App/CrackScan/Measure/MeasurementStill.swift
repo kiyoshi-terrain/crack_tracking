@@ -3,13 +3,13 @@ import CoreGraphics
 import Foundation
 import CrackCore
 
-/// 既知の長さで合わせた縦尺（スケールバー校正）の状態。
+/// 既知の長さで合わせた縮尺（スケールバー校正）の状態。
 struct ScaleCorrectionState {
-    /// LiDAR の縦尺に対する累積の倍率
+    /// LiDAR の縮尺に対する累積の倍率
     var factor: Double
     /// 入力した既知の長さ（mm）
     var knownMM: Double
-    /// LiDAR の縦尺で測れていた長さ（mm）
+    /// LiDAR の縮尺で測れていた長さ（mm）
     var measuredMM: Double
     /// 目印の 2 点（表示座標）
     var marksDisplay: [Vec2]
@@ -23,7 +23,7 @@ struct MeasurementStill {
     let frame: ARFrame
     /// false ならライブ映像（1920px 級）で代用した
     let isHighResolution: Bool
-    /// 壁面（カメラ座標系）。縦尺補正を当てると法線方向に動く
+    /// 壁面（カメラ座標系）。縮尺補正を当てると法線方向に動く
     var estimate: DepthPlaneEstimator.Estimate
     /// LiDAR から得た元の壁面（補正を外すときに戻す）
     let originalEstimate: DepthPlaneEstimator.Estimate
@@ -38,11 +38,11 @@ struct MeasurementStill {
     /// ブレ指標（ライブ判定と同じ尺度に縮小して計算）と、しきい値を満たすか
     let focusScore: Double
     let isSharp: Bool
-    /// 解析範囲の中心での代表値（縦尺補正で変わる）
+    /// 解析範囲の中心での代表値（縮尺補正で変わる）
     var millimetersPerPixel: Double
     var distance: Double
     let capturedAt: Date
-    /// 既知の長さで合わせた縦尺。nil なら LiDAR のまま
+    /// 既知の長さで合わせた縮尺。nil なら LiDAR のまま
     var scaleCorrection: ScaleCorrectionState?
 
     init(
@@ -78,12 +78,12 @@ struct MeasurementStill {
     /// 元画像の画素数
     var rawImageSize: CGSize { frame.capturedImageSize }
 
-    /// 元画像全体の換算器（現在の縦尺）
+    /// 元画像全体の換算器（現在の縮尺）
     var fullScale: SurfaceScale {
         SurfaceScale(intrinsics: DepthPlaneEstimator.cameraIntrinsics(frame: frame), plane: estimate.plane)
     }
 
-    /// 表示座標の 2 点のあいだの、壁面上の距離（mm）。現在の縦尺で
+    /// 表示座標の 2 点のあいだの、壁面上の距離（mm）。現在の縮尺で
     func surfaceDistanceMM(displayA: Vec2, displayB: Vec2) -> Double? {
         fullScale.surfaceDistance(from: mapping.toRaw(displayA), to: mapping.toRaw(displayB)).map { $0 * 1000 }
     }

@@ -137,7 +137,7 @@ final class WidthCalibrationTests: XCTestCase {
         XCTAssertEqual(thick.recalibrated(with: fitted).meanWidthMM, 3.0, accuracy: 0.1)
     }
 
-    /// 測り直しは補正前の半値幅から計算するので、縦尺補正と重ねても壊れない。
+    /// 測り直しは補正前の半値幅から計算するので、縮尺補正と重ねても壊れない。
     func testRecalibrationKeepsTheScaleCorrection() {
         let sample = WidthSample(
             position: Vec2(10, 10), normal: Vec2(1, 0), widthPixels: 10, rawWidthPixels: 12,
@@ -148,7 +148,7 @@ final class WidthCalibrationTests: XCTestCase {
             lengthMM: 2.0, maxWidthMM: 1.0, meanWidthMM: 1.0,
             millimetersPerPixel: 0.1, isResolutionSufficient: true, confidence: 0.8
         )
-        // 縦尺を 1.05 倍にしてから、太りを 2px 引く校正を当てる
+        // 縮尺を 1.05 倍にしてから、太りを 2px 引く校正を当てる
         let scaled = measurement.scaled(by: 1.05)
         let corrected = scaled.recalibrated(with: WidthCalibration(psfSigmaPx: 0, offsetPx: 2))
 
