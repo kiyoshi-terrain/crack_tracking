@@ -61,7 +61,16 @@ struct StillReviewView: View {
                 .ignoresSafeArea()
                 .overlay {
                     if measurer.isPlacingScale {
-                        aimReticle.allowsHitTesting(false)
+                        // 十字を描いた位置そのものを「置く点」にする（別々に中央を計算しない）
+                        GeometryReader { geometry in
+                            let frame = geometry.frame(in: .global)
+                            aimReticle
+                                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                                .onChange(of: frame, initial: true) { _, f in
+                                    aim.reticleCenterInWindow = CGPoint(x: f.midX, y: f.midY)
+                                }
+                        }
+                        .allowsHitTesting(false)
                     }
                 }
             }

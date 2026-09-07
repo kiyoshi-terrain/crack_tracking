@@ -18,11 +18,20 @@ struct StillOverlayLine: Identifiable {
 @MainActor
 final class StillAimHandle {
     fileprivate weak var view: StillScrollView?
+    /// 描いた十字の中心（ウィンドウ座標）。SwiftUI 側が置いた位置をそのまま使う。
+    /// スクロールビューの中心を別に計算すると、セーフエリアぶん食い違って必ずずれる
+    var reticleCenterInWindow: CGPoint?
 
     nonisolated init() {}
 
     /// 照準が指している表示画像の座標。ビューがまだ無ければ nil
-    var aimPoint: CGPoint? { view?.aimPointInCanvas }
+    var aimPoint: CGPoint? {
+        guard let view else { return nil }
+        if let center = reticleCenterInWindow {
+            return view.canvas.convert(center, from: nil)
+        }
+        return view.aimPointInCanvas
+    }
 
     /// 照準を表示画像の px 単位でずらす（画像の方を動かす）。指では 1px は動かせない
     func nudge(dx: CGFloat, dy: CGFloat) { view?.nudgeAim(dx: dx, dy: dy) }
