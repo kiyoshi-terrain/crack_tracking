@@ -20,6 +20,8 @@ struct StillReviewView: View {
     @State private var knownLengthText = "100"
     /// 幅校正に入力する既知の幅（mm）
     @State private var knownWidthText = "0.50"
+    /// 照準（画面中央）の位置を聞くための取っ手
+    @State private var aim = StillAimHandle()
     @State private var isConfirmingClearScale = false
     @State private var isConfirmingClearCalibration = false
 
@@ -47,14 +49,21 @@ struct StillReviewView: View {
                         }
                     },
                     onTap: { point, radius in
-                        if measurer.isPlacingScale {
-                            measurer.addScaleMark(Vec2(point.x, point.y))
-                        } else if let id = measurer.nearestCandidate(toDisplayPoint: Vec2(point.x, point.y), within: Double(radius)) {
+                        // 照準モードではタップは止めてある（誤操作で目印がずれるため）
+                        guard !measurer.isPlacingScale else { return }
+                        if let id = measurer.nearestCandidate(toDisplayPoint: Vec2(point.x, point.y), within: Double(radius)) {
                             measurer.toggle(id)
                         }
-                    }
+                    },
+                    isAiming: measurer.isPlacingScale,
+                    aim: aim
                 )
                 .ignoresSafeArea()
+                .overlay {
+                    if measurer.isPlacingScale {
+                        aimReticle.allowsHitTesting(false)
+                    }
+                }
             }
 
             VStack(spacing: 8) {
@@ -190,12 +199,24 @@ struct StillReviewView: View {
             if measurer.scaleMarksDisplay.count < 2 {
                 Label(
                     measurer.scaleMarksDisplay.isEmpty
-                        ? "既知の長さ（100 mm の目印など）の片方の端をタップ。ピンチで拡大すると正確です"
-                        : "もう片方の端をタップ",
-                    systemImage: "ruler"
+                        ? "既知の長さ（100 mm の目印など）の片方の端に画面中央の十字を合わせて「ここに置く」。"
+                            + "1 本指で画像を動かせます。ピンチで拡大するほど正確です"
+                        : "もう片方の端に十字を合わせて「ここに置く」",
+                    systemImage: "scope"
                 )
                 .font(.footnote)
                 .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    guard let point = aim.aimPoint else { return }
+                    measurer.addScaleMark(Vec2(point.x, point.y))
+                } label: {
+                    Label("ここに置く", systemImage: "scope")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
             } else {
                 if let measured = measurer.scaleMarksMeasuredMM {
                     Text(String(format: "LiDAR の縮尺では %.1f mm。実際の長さを入れてください", measured))
@@ -224,13 +245,37 @@ struct StillReviewView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.cyan)
                 }
-                Text("タップし直すと 2 点を置き直します")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("目印がずれていたら置き直してください")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("置き直す") { measurer.beginPlacingScale() }
+                        .font(.caption2)
+                }
             }
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 画面中央の照準。中心は空けてあり、狙う点そのものは何にも隠されない。
+    private var aimReticle: some View {
+        ZStack {
+            aimCross.stroke(Color.black.opacity(0.7), lineWidth: 3)
+            aimCross.stroke(Color.cyan, lineWidth: 1)
+        }
+        .frame(width: 64, height: 64)
+    }
+
+    private var aimCross: Path {
+        Path { p in
+            let c: CGFloat = 32, gap: CGFloat = 7, arm: CGFloat = 30
+            p.move(to: CGPoint(x: c - arm, y: c)); p.addLine(to: CGPoint(x: c - gap, y: c))
+            p.move(to: CGPoint(x: c + gap, y: c)); p.addLine(to: CGPoint(x: c + arm, y: c))
+            p.move(to: CGPoint(x: c, y: c - arm)); p.addLine(to: CGPoint(x: c, y: c - gap))
+            p.move(to: CGPoint(x: c, y: c + gap)); p.addLine(to: CGPoint(x: c, y: c + arm))
+        }
     }
 
     /// 幅校正（既知幅の線の実幅を入れてもらう）

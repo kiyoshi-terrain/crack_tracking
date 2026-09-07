@@ -10,6 +10,21 @@ struct StillOverlayLine: Identifiable {
     let label: String
 }
 
+/// 画面中央の照準が指している位置を、必要なときに聞くための取っ手。
+///
+/// 縮尺の目印は**指で置かない**。指先は自分が狙っている点を隠すので、いくら
+/// 拡大しても「見えない点」を狙うことになる（実機で 100mm の端を置けなかった）。
+/// 照準は画面中央に固定し、画像の方を動かして合わせ、ボタンで置く。
+@MainActor
+final class StillAimHandle {
+    fileprivate weak var view: StillScrollView?
+
+    nonisolated init() {}
+
+    /// 照準が指している表示画像の座標。ビューがまだ無ければ nil
+    var aimPoint: CGPoint? { view?.aimPointInCanvas }
+}
+
 /// ピンチで拡大・2 本指で移動・1 本指でなぞる、計測用の静止画ビュー。
 ///
 /// UIScrollView に任せる。SwiftUI だけだと「1 本指はなぞり、2 本指は移動」を
@@ -31,11 +46,17 @@ struct ZoomableStillView: UIViewRepresentable {
     let onStroke: (_ points: [CGPoint], _ radiusPx: CGFloat) -> Void
     /// タップ。位置（表示 px）と半径（表示 px）
     let onTap: (_ point: CGPoint, _ radiusPx: CGFloat) -> Void
+    /// 照準モード（縮尺の目印を置くあいだ）。1 本指で画像を動かし、なぞり・タップは止める
+    var isAiming: Bool = false
+    /// 照準の位置を聞くための取っ手
+    var aim: StillAimHandle? = nil
 
     func makeUIView(context: Context) -> StillScrollView {
         let view = StillScrollView()
         view.onStroke = onStroke
         view.onTap = onTap
+        view.isAiming = isAiming
+        aim?.view = view
         view.setImage(image)
         return view
     }
@@ -43,6 +64,8 @@ struct ZoomableStillView: UIViewRepresentable {
     func updateUIView(_ view: StillScrollView, context: Context) {
         view.onStroke = onStroke
         view.onTap = onTap
+        view.isAiming = isAiming
+        aim?.view = view
         if view.canvas.image !== image {
             view.setImage(image)
         }
@@ -66,6 +89,23 @@ final class StillScrollView: UIScrollView, UIScrollViewDelegate {
     private let fingerPoints: CGFloat = 28
     private var needsInitialFit = true
     private var strokePoints: [CGPoint] = []
+    private var strokeGesture: UIPanGestureRecognizer!
+    private var tapGesture: UITapGestureRecognizer!
+
+    /// 照準モード。1 本指の入力を「なぞり」から「画像の移動」へ入れ替える
+    var isAiming = false {
+        didSet {
+            guard isAiming != oldValue else { return }
+            panGestureRecognizer.minimumNumberOfTouches = isAiming ? 1 : 2
+            strokeGesture.isEnabled = !isAiming
+            tapGesture.isEnabled = !isAiming
+        }
+    }
+
+    /// 画面中央（照準）が指している表示画像の座標。
+    var aimPointInCanvas: CGPoint {
+        convert(CGPoint(x: bounds.midX, y: bounds.midY), to: canvas)
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -79,12 +119,12 @@ final class StillScrollView: UIScrollView, UIScrollViewDelegate {
         panGestureRecognizer.minimumNumberOfTouches = 2
         addSubview(canvas)
 
-        let stroke = UIPanGestureRecognizer(target: self, action: #selector(handleStroke(_:)))
-        stroke.maximumNumberOfTouches = 1
-        canvas.addGestureRecognizer(stroke)
+        strokeGesture = UIPanGestureRecognizer(target: self, action: #selector(handleStroke(_:)))
+        strokeGesture.maximumNumberOfTouches = 1
+        canvas.addGestureRecognizer(strokeGesture)
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        canvas.addGestureRecognizer(tap)
+        tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        canvas.addGestureRecognizer(tapGesture)
     }
 
     required init?(coder: NSCoder) {
@@ -106,7 +146,9 @@ final class StillScrollView: UIScrollView, UIScrollViewDelegate {
         guard bounds.width > 0, bounds.height > 0, canvas.bounds.width > 0 else { return }
         let fit = min(bounds.width / canvas.bounds.width, bounds.height / canvas.bounds.height)
         minimumZoomScale = fit
-        maximumZoomScale = max(2.0, fit * 10)
+        // 照準で合わせるには等倍より寄れた方がよい。fit*10 で画像 1px ≒ 画面 1pt、
+        // その 3 倍まで許すと 1pt の移動が 0.3px になり、目印を 1px 以内に置ける。
+        maximumZoomScale = max(2.0, fit * 30)
         if needsInitialFit {
             needsInitialFit = false
             zoomScale = fit
