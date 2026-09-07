@@ -23,6 +23,9 @@ final class StillAimHandle {
 
     /// 照準が指している表示画像の座標。ビューがまだ無ければ nil
     var aimPoint: CGPoint? { view?.aimPointInCanvas }
+
+    /// 照準を表示画像の px 単位でずらす（画像の方を動かす）。指では 1px は動かせない
+    func nudge(dx: CGFloat, dy: CGFloat) { view?.nudgeAim(dx: dx, dy: dy) }
 }
 
 /// ピンチで拡大・2 本指で移動・1 本指でなぞる、計測用の静止画ビュー。
@@ -105,6 +108,14 @@ final class StillScrollView: UIScrollView, UIScrollViewDelegate {
     /// 画面中央（照準）が指している表示画像の座標。
     var aimPointInCanvas: CGPoint {
         convert(CGPoint(x: bounds.midX, y: bounds.midY), to: canvas)
+    }
+
+    /// 照準を画像の px 単位でずらす。画像を逆向きに動かすので contentOffset は同じ向きに足す
+    func nudgeAim(dx: CGFloat, dy: CGFloat) {
+        var offset = contentOffset
+        offset.x += dx * zoomScale
+        offset.y += dy * zoomScale
+        setContentOffset(offset, animated: false)
     }
 
     override init(frame: CGRect) {
