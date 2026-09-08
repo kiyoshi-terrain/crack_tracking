@@ -479,19 +479,46 @@ final class ARCaptureController: NSObject, ObservableObject {
         motionDegPerSec = max(angle, equivalent) / dt * 180 / .pi
     }
 
-    /// 高解像度フレームの画素数を 1 回だけ調べる（保存はしない）。
+    /// 高解像度フレームの画素数を調べる。
+    ///
+    /// `captureHighResolutionFrame` は iOS がシャッター音を鳴らすので、起動のたびに
+    /// 呼ぶと「撮ってもいないのに鳴る」。画素数は端末と映像フォーマットで決まる値なので、
+    /// 一度分かったら端末に覚えておき、同じフォーマットなら聞き直さない。
     private func probeCaptureResolutionIfNeeded(frame: ARFrame) {
         guard captureResolution == nil, !isProbingCaptureResolution else { return }
         guard case .normal = frame.camera.trackingState else { return }
+        if let remembered = Self.rememberedCaptureResolution(for: frame) {
+            captureResolution = remembered
+            return
+        }
         isProbingCaptureResolution = true
         session.captureHighResolutionFrame { [weak self] hiRes, _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.isProbingCaptureResolution = false
                 // 実際の画素バッファの寸法で持つ（camera.imageResolution と食い違う可能性に備える）
-                if let hiRes { self.captureResolution = hiRes.capturedImageSize }
+                if let hiRes {
+                    self.captureResolution = hiRes.capturedImageSize
+                    Self.rememberCaptureResolution(hiRes.capturedImageSize, for: frame)
+                }
             }
         }
+    }
+
+    /// 覚える鍵は映像フォーマットの寸法（フォーマットが変われば高解像度の寸法も変わる）
+    private static func captureResolutionKey(for frame: ARFrame) -> String {
+        let live = frame.camera.imageResolution
+        return "captureResolution.\(Int(live.width))x\(Int(live.height))"
+    }
+
+    private static func rememberedCaptureResolution(for frame: ARFrame) -> CGSize? {
+        guard let stored = UserDefaults.standard.array(forKey: captureResolutionKey(for: frame)) as? [Double],
+              stored.count == 2, stored[0] > 0, stored[1] > 0 else { return nil }
+        return CGSize(width: stored[0], height: stored[1])
+    }
+
+    private static func rememberCaptureResolution(_ size: CGSize, for frame: ARFrame) {
+        UserDefaults.standard.set([Double(size.width), Double(size.height)], forKey: captureResolutionKey(for: frame))
     }
 
     private func makeConditions(

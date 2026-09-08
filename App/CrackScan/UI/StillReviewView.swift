@@ -61,7 +61,16 @@ struct StillReviewView: View {
                 .ignoresSafeArea()
                 .overlay {
                     if measurer.isPlacingScale {
-                        aimReticle.allowsHitTesting(false)
+                        // 十字を描いた位置そのものを「置く点」にする（別々に中央を計算しない）
+                        GeometryReader { geometry in
+                            let frame = geometry.frame(in: .global)
+                            aimReticle
+                                .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+                                .onChange(of: frame, initial: true) { _, f in
+                                    aim.reticleCenterInWindow = CGPoint(x: f.midX, y: f.midY)
+                                }
+                        }
+                        .allowsHitTesting(false)
                     }
                 }
             }
@@ -207,16 +216,23 @@ struct StillReviewView: View {
                 .font(.footnote)
                 .fixedSize(horizontal: false, vertical: true)
 
-                Button {
-                    guard let point = aim.aimPoint else { return }
-                    measurer.addScaleMark(Vec2(point.x, point.y))
-                } label: {
-                    Label("ここに置く", systemImage: "scope")
-                        .font(.footnote.weight(.semibold))
-                        .frame(maxWidth: .infinity)
+                HStack(spacing: 10) {
+                    // 1px の微調整。指では 1px は動かせないので矢印で
+                    nudgeButton("chevron.left", dx: -1, dy: 0)
+                    nudgeButton("chevron.up", dx: 0, dy: -1)
+                    nudgeButton("chevron.down", dx: 0, dy: 1)
+                    nudgeButton("chevron.right", dx: 1, dy: 0)
+                    Button {
+                        guard let point = aim.aimPoint else { return }
+                        measurer.addScaleMark(Vec2(point.x, point.y))
+                    } label: {
+                        Label("ここに置く", systemImage: "scope")
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.cyan)
             } else {
                 if let measured = measurer.scaleMarksMeasuredMM {
                     Text(String(format: "LiDAR の縮尺では %.1f mm。実際の長さを入れてください", measured))
@@ -257,6 +273,18 @@ struct StillReviewView: View {
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    /// 照準を 1px ずらすボタン
+    private func nudgeButton(_ symbol: String, dx: CGFloat, dy: CGFloat) -> some View {
+        Button {
+            aim.nudge(dx: dx, dy: dy)
+        } label: {
+            Image(systemName: symbol)
+                .font(.footnote.weight(.bold))
+                .frame(width: 34, height: 30)
+        }
+        .buttonStyle(.bordered)
     }
 
     /// 画面中央の照準。中心は空けてあり、狙う点そのものは何にも隠されない。
