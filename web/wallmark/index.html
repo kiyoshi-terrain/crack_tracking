@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>壁面ターゲット確認シート — 60mm 角・黒丸 20mm（原寸印刷）</title>
+<style>
+  /* 製図の語彙で組む（gauge/ と同じ）。用紙は白地に黒。赤は寸法の指示線に限る。 */
+  :root {
+    --ground: #f2f3f4;
+    --panel: #fbfbfb;
+    --ink: #16181d;
+    --ink-soft: #5c6270;
+    --rule: #d6d8dc;
+    --mark: #b03a2e;
+    --verify: #2f6f5e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a; --panel: #1b1e24; --ink: #e8eaee;
+      --ink-soft: #99a0ac; --rule: #2c313a;
+      --mark: #e2725c; --verify: #5cbfa4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a; --panel: #1b1e24; --ink: #e8eaee;
+    --ink-soft: #99a0ac; --rule: #2c313a;
+    --mark: #e2725c; --verify: #5cbfa4;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    line-height: 1.7;
+  }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap {
+    max-width: 1180px; margin: 0 auto; padding: 32px 24px 72px;
+    display: grid; grid-template-columns: minmax(320px, 420px) minmax(0, 1fr); gap: 40px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; gap: 28px; } }
+
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; }
+  .lede { color: var(--ink-soft); font-size: 14px; margin: 0 0 24px; }
+  .eyebrow {
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 28px 0 10px; font-weight: 600;
+  }
+  .eyebrow:first-of-type { margin-top: 0; }
+  .callout {
+    border-left: 3px solid var(--mark); padding: 12px 14px; margin: 0 0 20px;
+    background: color-mix(in srgb, var(--mark) 7%, transparent);
+    font-size: 14px;
+  }
+  .callout strong { color: var(--mark); }
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step; position: relative;
+    padding: 0 0 14px 34px; font-size: 14px;
+  }
+  ol.steps li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute; left: 0; top: 1px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--mark); font-weight: 600;
+  }
+  ol.steps li em { font-style: normal; color: var(--verify); font-weight: 600; }
+  table.spec { border-collapse: collapse; font-size: 13.5px; width: 100%; }
+  table.spec th, table.spec td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--rule); }
+  table.spec th { color: var(--ink-soft); font-weight: 600; }
+  table.spec td.mono { text-align: right; }
+  p.note { font-size: 13px; color: var(--ink-soft); margin: 8px 0 0; }
+
+  button.print {
+    appearance: none; border: 1px solid var(--ink); background: var(--ink); color: var(--ground);
+    font: inherit; font-size: 14px; font-weight: 600; padding: 11px 22px; border-radius: 4px;
+    cursor: pointer; margin-bottom: 18px;
+  }
+  button.print:hover { opacity: .88; }
+  button.print:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+
+  .sheet-frame {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 14px; overflow-x: auto; min-width: 0;
+  }
+  /* 用紙は常に白地に黒。テーマで反転させない（計測対象なので） */
+  .sheet {
+    width: 210mm; height: 297mm; background: #fff; display: block;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  .sheet-frame .scaler { transform-origin: top left; }
+  a { color: var(--mark); }
+
+  @media print {
+    @page { size: A4 portrait; margin: 0; }
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .wrap { display: block; max-width: none; margin: 0; padding: 0; }
+    .sheet-frame { border: 0; padding: 0; background: #fff; overflow: visible; }
+    .sheet-frame .scaler { transform: none !important; }
+    .sheet { box-shadow: none; width: 210mm; height: 297mm; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="no-print">
+    <h1>壁面ターゲット確認シート</h1>
+    <p class="lede">
+      現地に貼る目印と<strong>同じ寸法</strong>（60mm 角・黒丸 20mm）を紙で刷って、
+      σ実測ツールが検出できるかを屋内で確かめるためのシートです。
+      アルミ板を作る前に、寸法と手順がこれで合っているかを見ておけます。
+    </p>
+
+    <button class="print" onclick="window.print()">印刷する</button>
+
+    <div class="callout">
+      <strong>必ず原寸（100%）で印刷してください。</strong>
+      プリンタの既定は「用紙に合わせる」で約 96% に縮みます。印刷後、上部の
+      <strong>左右の十字の交点どうし</strong>を定規で測って <span class="mono">100.0mm</span>
+      であることを確認してください。ここが違うと、下に書いた中心間距離も全部違います。
+    </div>
+
+    <p class="eyebrow">手順</p>
+    <ol class="steps">
+      <li>印刷して、<em>平らな壁</em>にテープで貼る。波打たせない。四隅と中央を留める。</li>
+      <li><em>三脚に固定</em>して撮る。手持ちは不可。手ブレがそのまま σ に化ける。</li>
+      <li>黒丸が <em>12〜60px</em> に写る距離から撮る。望遠なら 3〜5m、メインなら 1〜2m（下表）。</li>
+      <li>σ実測ツールで<em>解析範囲をシートに絞り</em>、9 点すべて検出されるか見る。
+        余計なものが候補に混じるなら、範囲を狭める。</li>
+      <li>何も動かさずに 10 枚撮る。真の変位はゼロなので、
+        出てくる <em>σ がその機材の計測ノイズそのもの</em>。これが現地での下限になる。</li>
+      <li>「既知の基準距離」に <span class="mono">60.00</span>（隣どうし）を入れれば mm 換算になる。
+        距離計も焦点距離も要らない。</li>
+    </ol>
+
+    <p class="eyebrow">撮影距離と黒丸の写る大きさ</p>
+    <table class="spec">
+      <tr><th>レンズ</th><th>距離</th><th>黒丸 20mm</th></tr>
+      <tr><td>望遠 120mm 相当・12MP</td><td class="mono">3 m</td><td class="mono">90 px</td></tr>
+      <tr><td>望遠 120mm 相当・12MP</td><td class="mono">5 m</td><td class="mono">54 px</td></tr>
+      <tr><td>メイン 24mm 相当・24MP</td><td class="mono">1 m</td><td class="mono">76 px</td></tr>
+      <tr><td>メイン 24mm 相当・24MP</td><td class="mono">2 m</td><td class="mono">38 px</td></tr>
+      <tr><td>メイン 24mm 相当・48MP</td><td class="mono">2 m</td><td class="mono">54 px</td></tr>
+      <tr><td>メイン 24mm 相当・48MP</td><td class="mono">3 m</td><td class="mono">36 px</td></tr>
+    </table>
+    <p class="note">
+      現地は 18m・望遠で 15px です。屋内で 54px なら余裕があるので、
+      ここで検出できないなら寸法か印刷倍率が違います。
+    </p>
+
+    <p class="eyebrow">紙でよい理由と、よくない点</p>
+    <p class="note">
+      屋内で近くから一度撮るだけなので、耐候性も反射も関係しません。現地の板は
+      屋外に何年も置くためのもので、写り方は同じです。
+    </p>
+    <p class="note">
+      ただし<strong>白い紙は大谷石よりずっと明るく、背景も一様</strong>です。ここで通っても
+      現地でそのまま通る保証はありません。現地では必ず検出数を確かめてください。
+    </p>
+    <p class="note">
+      切り離して壁に散らして貼ると、現地の配置（周囲に 6〜8 枚）に近い試しになります。
+      その場合は中心間距離が分からなくなるので、貼ってからメジャーで測ってください。
+    </p>
+  </div>
+
+  <div class="sheet-frame">
+    <div class="scaler" id="scaler">
+      <svg class="sheet" viewBox="0 0 210 297" xmlns="http://www.w3.org/2000/svg">
+        <rect width="210" height="297" fill="#fff"/>
+
+        <text x="105" y="14" font-family="sans-serif" font-size="5" font-weight="bold"
+              text-anchor="middle" fill="#000">壁面ターゲット確認シート</text>
+        <text x="105" y="20.5" font-family="sans-serif" font-size="3"
+              text-anchor="middle" fill="#444">A4 原寸印刷／60mm 角・黒丸 20mm（現地に貼る目印と同じ寸法）</text>
+
+        <!-- 100mm の基準。印刷倍率の確認用。狙う点を細い十字の交点にしてある -->
+        <g stroke="#000" stroke-width="0.15">
+          <line x1="49" y1="31" x2="161" y2="31"/>
+          <line x1="55" y1="26" x2="55" y2="36"/>
+          <line x1="155" y1="26" x2="155" y2="36"/>
+        </g>
+        <text x="105" y="40.5" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#000">左右の十字の交点どうしが 100.0mm（定規で確認）。ここが違えば下の寸法も全部違う</text>
+
+        <!-- 切り分け線（薄いグレー。重心の窓 44mm の外なので計測に入らない） -->
+        <g stroke="#c8c8c8" stroke-width="0.2" fill="none">
+          <rect x="15" y="48" width="180" height="180"/>
+          <line x1="75" y1="48" x2="75" y2="228"/>
+          <line x1="135" y1="48" x2="135" y2="228"/>
+          <line x1="15" y1="108" x2="195" y2="108"/>
+          <line x1="15" y1="168" x2="195" y2="168"/>
+        </g>
+
+        <!-- 黒丸 20mm（半径 10mm）。60mm 角の中心に 9 個 -->
+        <g fill="#000">
+          <circle cx="45"  cy="78"  r="10"/>
+          <circle cx="105" cy="78"  r="10"/>
+          <circle cx="165" cy="78"  r="10"/>
+          <circle cx="45"  cy="138" r="10"/>
+          <circle cx="105" cy="138" r="10"/>
+          <circle cx="165" cy="138" r="10"/>
+          <circle cx="45"  cy="198" r="10"/>
+          <circle cx="105" cy="198" r="10"/>
+          <circle cx="165" cy="198" r="10"/>
+        </g>
+
+        <text x="105" y="239" font-family="sans-serif" font-size="3.2" font-weight="bold"
+              text-anchor="middle" fill="#000">中心間の距離（原寸で印刷したとき）</text>
+        <text x="105" y="246" font-family="sans-serif" font-size="2.9"
+              text-anchor="middle" fill="#000">隣どうし 60.00mm ／ 斜め 84.85mm ／ 1 つ飛び 120.00mm ／ 四隅の対角 169.71mm</text>
+        <text x="105" y="254" font-family="sans-serif" font-size="2.6"
+              text-anchor="middle" fill="#666">σ実測ツールの「既知の基準距離」にこの値を入れると mm 換算になる（距離計も焦点距離も不要）</text>
+        <text x="105" y="261" font-family="sans-serif" font-size="2.6"
+              text-anchor="middle" fill="#666">黒丸の写る大きさ ─ 望遠120mm相当: 3m で 90px・5m で 54px</text>
+        <text x="105" y="267" font-family="sans-serif" font-size="2.6"
+              text-anchor="middle" fill="#666">メイン24mm相当(24MP): 1m で 76px・2m で 38px　三脚に固定して撮ること</text>
+
+        <g stroke="#000" stroke-width="0.3" fill="none">
+          <path d="M8 8 h6 M8 8 v6"/><path d="M202 8 h-6 M202 8 v6"/>
+          <path d="M8 289 h6 M8 289 v-6"/><path d="M202 289 h-6 M202 289 v-6"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 画面では用紙全体が収まるように縮小表示する。印刷時は CSS が transform を外して原寸に戻す。
+  function fitSheet() {
+    const frame = document.querySelector('.sheet-frame');
+    const scaler = document.getElementById('scaler');
+    const sheet = scaler.querySelector('.sheet');
+    scaler.style.transform = 'none';
+    const available = frame.clientWidth - 28;
+    const natural = sheet.getBoundingClientRect();
+    if (!natural.width) return;
+    const factor = Math.min(1, available / natural.width);
+    scaler.style.transform = `scale(${factor})`;
+    // 高さは変形前の寸法から出す（変形後の矩形に factor を掛けると二重に縮んで下が切れる）
+    scaler.style.height = `${natural.height * factor}px`;
+  }
+  window.addEventListener('resize', fitSheet);
+  window.addEventListener('load', fitSheet);
+  fitSheet();
+</script>
+</body>
+</html>
