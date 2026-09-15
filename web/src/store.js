@@ -100,3 +100,25 @@ export function imageDataToBlob(imageData, quality = 0.9) {
       'image/jpeg', quality);
   });
 }
+
+/** 基準枠だけを更新。写真・撮影日・縮尺・亀裂・解析範囲は保持する。 */
+export async function updateBaselineAlignment(name, alignment, expectedSavedAt, expectedAlignment = null) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+    let error = null, meta = null;
+    const req = store.get(name);
+    req.onsuccess = () => {
+      const row = req.result;
+      if (!row || row.savedAt !== expectedSavedAt
+          || JSON.stringify(row.meta?.alignment ?? null) !== JSON.stringify(expectedAlignment)) {
+        error = new Error('保存済みの基準が更新されています。基準を読み直してから枠を設定してください');
+        tx.abort(); return;
+      }
+      meta = { ...row.meta, alignment, alignmentUpdatedAt: new Date().toISOString() };
+      store.put({ ...row, meta });
+    };
+    tx.oncomplete = () => { db.close(); resolve(meta); };
+    tx.onabort = tx.onerror = () => { db.close(); reject(error ?? tx.error ?? new Error('基準枠を保存できませんでした')); };
+  });
+}

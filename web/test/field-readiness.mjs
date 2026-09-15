@@ -4,9 +4,25 @@ import { residuals } from '../src/transform.js';
 import { crackOpening, crackOpeningEpoch } from '../src/crackline.js';
 import { createStation, addObservation, serialize, deserialize } from '../src/history.js';
 import { makeBlobs, renderBlobs } from './synthetic.mjs';
+import { imagePoint, rectangleFromDrag, validAlignment, alignmentPredicate } from '../src/alignmentregion.js';
 import { downsample } from '../src/image.js';
 
 export async function runFieldReadinessTests(check, near) {
+  console.log('\n== DIC専用基準領域 ==');
+  const point = imagePoint(170, 100, { left: 20, top: 25, width: 300, height: 150 }, 1200, 600);
+  check('縮小表示のタッチ座標を基準画像へ戻す', point.x === 600 && point.y === 300);
+  check('画面外へのドラッグを画像端へ制限', imagePoint(-20, 300, { left: 20, top: 25, width: 300, height: 150 }, 1200, 600).y === 600);
+  check('非表示キャンバスの座標を拒否', imagePoint(0, 0, {width: 0, height: 0}, 100, 100) === null);
+  const rect = rectangleFromDrag({x: 200, y: 150}, {x: 20, y: 10}, 300, 200);
+  check('逆方向にも基準枠を描ける', rect.x === 20 && rect.y === 10 && rect.width === 180 && rect.height === 140);
+  check('タップを基準枠にしない', rectangleFromDrag({x: 20, y: 10}, {x: 20, y: 10}, 300, 200) === null);
+  const setting = {version: 1, width: 300, height: 200, roi: rect};
+  const restored = validAlignment(JSON.parse(JSON.stringify(setting)), 300, 200);
+  check('専用枠を元画像座標で復元', restored.roi.width === 180 && alignmentPredicate(restored)(100, 100));
+  check('別解像度の枠を黙って流用しない', !validAlignment(setting, 600, 400));
+  check('画像外にはみ出す保存枠を拒否', !validAlignment({...setting, roi: {...rect, width: 900}}, 300, 200));
+  check('旧解析ROIをDIC基準領域に自動転用しない', !validAlignment({roi: rect}, 300, 200));
+  check('枠外の計測点を基準には含めない', !alignmentPredicate(restored)(250, 180));
   console.log('\n== 現地準備: 現地ID・縮尺・履歴 ==');
   const pairs = [{ i: 0, j: 1, distance: 100 }, { i: 0, j: 2, distance: 120 }, { i: 1, j: 2, distance: 156 }];
   const ids = [{ id: 'L1', member: '石A' }, { id: 'L2', member: '石A' }, { id: 'R1', member: '石B' }];
@@ -72,9 +88,17 @@ export async function runFieldReadinessTests(check, near) {
     const op = crackOpeningEpoch(result.cells, { x1: 240, y1: 50, x2: 240, y2: 310 }, { margin: 25, depth: 70 });
     check(`開口の符号と量を復元 縮小${coarseScale}`, op.ok && near(op.openingPx, 0.75, 0.08), `${op.openingPx?.toFixed(4)} px`);
     check(`両段階で安定点を使用 縮小${coarseScale}`, result.frames.every((f) => f.coarseStableUsed > 0 && f.stableUsed > 0));
+    check(`診断点数が最終フィットと一致 縮小${coarseScale}`, result.frames.every((f) =>
+      f.alignment.coarse.used === f.coarseStableUsed && f.alignment.fine.used === f.stableUsed));
+    check(`両段階の表示座標は元画像の安定域内 縮小${coarseScale}`, result.frames.every((f) =>
+      ['coarse', 'fine'].every((stage) => f.alignment[stage].points.every((p) => p.x < 205 && p.y < H))));
+    check(`精密な採用点の分布が格子間隔を保持 縮小${coarseScale}`, result.frames.every((f) =>
+      f.alignment.fine.points.every((p) => p.x % opts.step === 0 && p.y % opts.step === 0)));
+
   }
   const failed = await measureEpochChange(ref, [frames[0]], { ...opts, stableRegion: () => false });
   check('安定域不足で全体フィットへ黙って戻らない', !failed.ok && failed.reason.includes('安定域'));
+  check('不成立でも基準点の不足を診断できる', failed.frames[0].alignment.coarse.used === 0 && !!failed.frames[0].reason);
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

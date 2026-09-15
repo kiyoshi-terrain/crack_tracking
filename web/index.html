@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v31">
+<html lang="ja" data-version="v32">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -511,9 +511,10 @@
   th { color: var(--ink-soft); font-weight: 600; font-size: 11.5px; }
   td.num, th.num { text-align: right; }
 
-  canvas#fieldCanvas, canvas#bulgeCanvas, canvas#trendCanvas, canvas#compareCanvas {
+  canvas#fieldCanvas, canvas#bulgeCanvas, canvas#trendCanvas, canvas#compareCanvas, canvas#compareAlignmentCanvas {
     max-width: 100%; background: #0a0e0c; border-radius: 8px; border: 1px solid var(--line); display: block;
   }
+  canvas#compareAlignmentCanvas { width: 100%; height: auto; padding: 0; border: 0; outline: 1px solid var(--line); touch-action: pan-y; }
   canvas#bulgeCanvas { image-rendering: pixelated; }
   canvas#trendCanvas { margin-top: 14px; }
   .hidden { display: none !important; }
@@ -899,21 +900,30 @@
         <span class="note" id="compareBaseInfo" style="margin:0"></span>
       </div>
 
-      <div class="row" style="margin-top:12px">
-        <div>
-          <label>カメラの動きを推定する範囲（安定域）</label>
-          <select id="compareStable">
-            <option value="auto">全体から推定（変化分布の探索用）</option>
-            <option value="inside">基準画像の枠の内側を安定域にする</option>
-            <option value="outside">基準画像の枠の外側を安定域にする</option>
-          </select>
-        </div>
+      <h3 class="sec">DICの基準領域</h3>
+      <label for="compareStable">位置合わせに使う範囲</label>
+      <select id="compareStable">
+        <option value="inside">青い基準枠の内側</option>
+        <option value="auto">写真全体（変化分布の探索用）</option>
+      </select>
+      <p class="note">計測する亀裂とは別に、相互に動かない同一面の模様を選びます。亀裂の両側や別々に動く石を基準枠へ混ぜないでください。青い枠は不動を自動確認した範囲ではありません。</p>
+      <div class="row">
+        <button id="compareAlignmentEdit" disabled>青い基準枠を描く</button>
+        <button id="compareAlignmentClear" disabled>基準枠を消す</button>
+        <button id="compareAlignmentSave" disabled>基準枠をこの測点に保存</button>
       </div>
-      <p class="note">
-        亀裂測点の開口は、安定域を指定して計測します。基準セットを保存する際に枠を設定してください。
-        枠内を安定域にする場合、亀裂の両側の計測帯も写真に含めて保存します。計測時の模様が枠の外にあっても比較できます。
-        安定域は人が選んだ基準であり、不動を自動確認したものではありません。
-      </p>
+      <p class="note" id="compareAlignmentInfo" aria-live="polite"></p>
+      <p class="note" id="compareAlignmentSaveInfo" aria-live="polite"></p>
+      <canvas id="compareAlignmentCanvas" class="hidden" aria-label="基準写真。描画ボタンを押してDIC基準領域を指定"></canvas>
+      <p class="note">青枠：DIC基準領域。橙の破線：保存時の解析範囲。橙の線：保存した亀裂測点。亀裂の計測は青枠の外でも行います。</p>
+      <div id="compareAlignmentResult" class="hidden">
+        <div class="row">
+          <div><label for="compareAlignmentFrame">対応点を表示する今回写真</label><select id="compareAlignmentFrame"></select></div>
+          <div><label for="compareAlignmentStage">位置合わせの段階</label><select id="compareAlignmentStage"><option value="fine">精密な位置合わせ</option><option value="coarse">粗い位置合わせ</option></select></div>
+        </div>
+        <p class="note">緑：変換の推定に採用。赤：対応したが外れ値として除外。灰：対応が成立せず。黄：対応はあるが変換推定が不成立。点数が足りても、偏った分布や基準部分の動きによる誤差は残ります。</p>
+        <div id="compareAlignmentCounts" class="scroll-x"></div>
+      </div>
 
       <label for="compareReferenceGsd">基準写真の縮尺（mm/px）</label>
       <input type="number" id="compareReferenceGsd" min="0" step="any" inputmode="decimal" placeholder="保存した基準から自動入力／不明なら px 表示">

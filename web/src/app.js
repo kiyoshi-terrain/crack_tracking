@@ -17,7 +17,7 @@ import { initCloudPanel, refreshCloudScale, cloudGSD, cloudState } from './cloud
 import { sampleOutOfPlane } from './pointcloud.js';
 import { initHistoryPanel, refreshHistoryPanel, historySummary } from './historypanel.js';
 import { initShell, updateHud, setViewfinderHint, openSheet, closeSheet, routeHud } from './shell.js';
-import { initComparePanel, compareLamp, refreshSavedBaselines } from './comparepanel.js';
+import { initComparePanel, compareLamp, refreshSavedBaselines, invalidateComparison } from './comparepanel.js';
 import { initCloudDiffPanel, cloudDiffLamp } from './clouddiffpanel.js';
 import {
   initCapturePanel, toggleLive, liveActive, sessionActive,
@@ -607,6 +607,7 @@ for (const id of ['distance', 'focal35', 'referenceLength', 'focalTele', 'focalU
 $('referencePair').addEventListener('change', () => { refreshTargetValues(); updateGSD(); });
 
 function invalidateMeasurement() {
+  invalidateComparison();
   state.targetAnalysis = null;
   state.targetPairs = [];
   state.analysisStats = null;
