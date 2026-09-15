@@ -26,20 +26,17 @@ const $ = (id) => document.getElementById(id);
 const MAX_FRAMES_B = 5;
 
 let getFrames = () => [];
-let getGsd = () => null;
-let getRoi = () => null;
 let getLens = () => null;
 let getSurface = () => null;
 let onChange = () => {};
 let baseFiles = [];
+let baseRoi = null;
 let baseCracks = [];      // 基準に保存された亀裂測点の線（基準画像の画素座標）
 let onMeasurement = () => {};
 let lastOutcome = null;   // 'changed' | 'surface' | 'quiet' | null
 
 export function initComparePanel(options = {}) {
   getFrames = options.getFrames ?? (() => []);
-  getGsd = options.getGsd ?? (() => null);
-  getRoi = options.getRoi ?? (() => null);
   getLens = options.getLens ?? (() => null);
   getSurface = options.getSurface ?? (() => null);
   onChange = options.onChange ?? (() => {});
@@ -52,6 +49,9 @@ export function initComparePanel(options = {}) {
     );
     baseFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     baseCracks = [];
+    baseRoi = null;
+    $('compareReferenceGsd').value = '';
+    clearComparison();
     $('compareBaseInfo').textContent = baseFiles.length
       ? `${baseFiles.length} 枚（1枚目が基準、2枚目を基準日の σ に使います）`
       : '';
@@ -60,6 +60,9 @@ export function initComparePanel(options = {}) {
   });
 
   $('compareRun').addEventListener('click', run);
+  for (const id of ['compareStable', 'compareReferenceGsd']) {
+    $(id).addEventListener('input', () => { clearComparison(); onChange(); });
+  }
 
   $('compareUseSaved').addEventListener('click', useSavedBaseline);
   $('compareRevisit').addEventListener('click', startRevisit);
@@ -90,6 +93,10 @@ async function useSavedBaseline() {
   if (!row) { banner('warn', '読み出せませんでした', '保存が消えている可能性があります。'); return; }
   baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
   baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
+  baseRoi = row.meta?.roi ?? null;
+  $('compareReferenceGsd').value = row.meta?.gsd > 0 ? row.meta.gsd : '';
+  clearComparison();
+  await showBaseline();
   $('compareBaseInfo').textContent =
     `基準「${name}」 ${baseFiles.length} 枚（${row.savedAt.slice(0, 10)} 保存）`
     + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
@@ -110,6 +117,10 @@ async function startRevisit() {
   // 比較用の基準もこの測点に揃える（撮影後そのまま「変化を抽出」できる）
   baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
   baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
+  baseRoi = row.meta?.roi ?? null;
+  $('compareReferenceGsd').value = row.meta?.gsd > 0 ? row.meta.gsd : '';
+  clearComparison();
+  await showBaseline();
   $('compareBaseInfo').textContent = `基準「${name}」 ${baseFiles.length} 枚`
     + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
 
@@ -137,6 +148,30 @@ export function compareLamp() {
   return null;
 }
 
+function clearComparison() {
+  lastOutcome = null;
+  onMeasurement(null);
+  for (const id of ['compareCracks', 'compareStats', 'compareLegend', 'compareStatus']) $(id).innerHTML = '';
+}
+
+async function showBaseline() {
+  if (!baseFiles.length) return;
+  const bitmap = await createImageBitmap(baseFiles[0]);
+  const canvas = $('compareCanvas');
+  const factor = Math.min(1, 760 / bitmap.width);
+  canvas.width = Math.round(bitmap.width * factor);
+  canvas.height = Math.round(bitmap.height * factor);
+  canvas.classList.remove('hidden');
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  if (baseRoi) {
+    ctx.strokeStyle = '#ffb454'; ctx.lineWidth = 3;
+    ctx.strokeRect(baseRoi.x * factor, baseRoi.y * factor, baseRoi.width * factor, baseRoi.height * factor);
+  }
+  $('compareLegend').textContent = '基準写真。橙枠は基準セットに保存した範囲です。位置合わせに使う内側／外側を選んでください。';
+}
+
 function status(html) {
   $('compareStatus').innerHTML = html;
 }
@@ -161,6 +196,21 @@ async function run() {
     return;
   }
 
+  clearComparison();
+  const stableMode = $('compareStable').value;
+  const roi = baseRoi;
+  if (stableMode !== 'auto' && !roi) {
+    banner('warn', '基準写真の枠がありません', '基準日に枠で安定域を指定してから、基準セットを保存してください。');
+    return;
+  }
+  if (baseCracks.length && stableMode === 'auto') {
+    banner('warn', '開口の計測には安定域を指定してください',
+      '全体で位置合わせすると部材の動きが補正に混ざります。基準画像の橙枠の内側または外側から、相互に動かない領域を選んでください。');
+    return;
+  }
+  const inside = roi ? (x, y) => x >= roi.x && x <= roi.x + roi.width && y >= roi.y && y <= roi.y + roi.height : null;
+  const stableRegion = stableMode === 'inside' ? inside
+    : stableMode === 'outside' && inside ? (x, y) => !inside(x, y) : null;
   const channel = $('channel').value;
   const subsetHalf = clampInt($('subsetHalf').value, 5, 60, 15);
   $('compareRun').disabled = true;
@@ -194,11 +244,6 @@ async function run() {
     // 呼ばれたときに変換する形で渡す
     const used = frames.slice(0, MAX_FRAMES_B);
     const providers = used.map((f) => () => toGray(f.imageData, null, channel, true));
-
-    const roi = getRoi();
-    const stableRegion = $('compareStable').value === 'outside' && roi
-      ? (x, y) => !(x >= roi.x && x <= roi.x + roi.width && y >= roi.y && y <= roi.y + roi.height)
-      : null;
 
     const result = await measureEpochChange(grayA, providers, {
       subsetHalf,
@@ -250,7 +295,8 @@ async function run() {
 }
 
 function render(result, grayA, context) {
-  const gsd = getGsd();
+  const enteredGsd = Number($('compareReferenceGsd').value);
+  const gsd = Number.isFinite(enteredGsd) && enteredGsd > 0 ? enteredGsd : null;
   const toMM = (px) => (gsd ? `${(px * gsd).toFixed(3)} mm` : `${px.toFixed(3)} px`);
 
   const moved = groupSignificant(result, { minCells: 2 });
@@ -341,7 +387,7 @@ function render(result, grayA, context) {
       + '限界は系統誤差の床だけで判定しています。次回から連写を基準に使ってください。</div></div>'
       : '')
     + (gsd == null
-      ? '<p class="note">スケール未設定のため px 表示です。スケールシートで決めると mm になります。</p>'
+      ? '<p class="note">基準写真の縮尺が未設定のため px 表示です。比較シートの「基準写真の縮尺」を入力してください。</p>'
       : '');
 
   status(verdict);

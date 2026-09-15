@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v30">
+<html lang="ja" data-version="v31">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -700,7 +700,7 @@
       </div>
 
       <div id="referenceScale" class="hidden" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-        <label style="margin-bottom:8px;color:var(--amber)">既知の基準距離から決める（こちらが高精度）</label>
+        <label style="margin-bottom:8px;color:var(--amber)">同一部材上の既知距離で縮尺を決める</label>
         <div class="row">
           <div>
             <label>基準にするターゲット対</label>
@@ -711,7 +711,7 @@
             <input type="number" id="referenceLength" step="0.01" min="1" inputmode="decimal" placeholder="ノギスの実測値">
           </div>
         </div>
-        <p class="note">距離計も焦点距離も不要になり、印刷倍率の誤差も吸収できます。</p>
+        <p class="note">結果シートで現地IDと部材IDを照合してください。同一部材上で距離が変わらない対だけを選びます。き裂をまたぐ対は縮尺に使えません。斜め撮影や奥行き差は補正しません。</p>
       </div>
 
       <p class="note">未入力でも σ は px 単位で出ます。mm 換算にだけ必要です。</p>
@@ -903,16 +903,21 @@
         <div>
           <label>カメラの動きを推定する範囲（安定域）</label>
           <select id="compareStable">
-            <option value="auto">全体からロバストに推定</option>
-            <option value="outside">解析範囲の枠の外側を使う</option>
+            <option value="auto">全体から推定（変化分布の探索用）</option>
+            <option value="inside">基準画像の枠の内側を安定域にする</option>
+            <option value="outside">基準画像の枠の外側を安定域にする</option>
           </select>
         </div>
       </div>
       <p class="note">
-        動くと疑う塊が画面の大部分を占める場合は、ビューファインダーで枠をその塊に合わせ、
-        「枠の外側」を選んでください。枠の外がカメラの動きの基準になります。
+        亀裂測点の開口は、安定域を指定して計測します。基準セットを保存する際に枠を設定してください。
+        枠内を安定域にする場合、亀裂の両側の計測帯も写真に含めて保存します。計測時の模様が枠の外にあっても比較できます。
+        安定域は人が選んだ基準であり、不動を自動確認したものではありません。
       </p>
 
+      <label for="compareReferenceGsd">基準写真の縮尺（mm/px）</label>
+      <input type="number" id="compareReferenceGsd" min="0" step="any" inputmode="decimal" placeholder="保存した基準から自動入力／不明なら px 表示">
+      <p class="note">変位は基準写真の座標で算出します。今回の写真の縮尺と取り違えないでください。</p>
       <button class="primary wide" id="compareRun" style="margin-top:12px">変化を抽出する</button>
       <div id="compareStatus" style="margin-top:12px"></div>
       <canvas id="compareCanvas" class="hidden"></canvas>

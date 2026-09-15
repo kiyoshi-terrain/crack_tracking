@@ -223,6 +223,13 @@ function bilinear(img, x, y) {
     + (img.data[i + img.width] * (1 - tx) + img.data[i + img.width + 1] * tx) * ty;
 }
 
+// サブセット全体が安定域に入る点だけを位置合わせに使う。
+export function stableSubset(predicate, x, y, radius = 0) {
+  if (!predicate) return true;
+  return [-radius, 0, radius].every((dx) =>
+    [-radius, 0, radius].every((dy) => predicate(x + dx, y + dy)));
+}
+
 export async function measureEpochChange(referenceA, framesB, options = {}) {
   const {
     subsetHalf = 15,
@@ -297,11 +304,13 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       initialShift: shift,
     });
     // 当てはめの自由度が確保できる点数か（アフィン6・ホモグラフィ8 + 余裕）
-    if (coarse.points.length < (useHomography ? 10 : 8)) {
+    const firstPoints = coarse.points.filter((p) => stableSubset(stableRegion,
+      p.x * coarseScale, p.y * coarseScale, subsetHalf * coarseScale));
+    if (firstPoints.length < (useHomography ? 10 : 8)) {
       frameSummaries.push({ ok: false, matched: coarse.points.length });
       continue;
     }
-    const first = fitTransformRobust(coarse.points, useHomography);
+    const first = fitTransformRobust(firstPoints, useHomography);
     if (!first.transform) {
       frameSummaries.push({ ok: false, matched: coarse.points.length });
       continue;
@@ -361,7 +370,7 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
 
     const stableIdx = [];
     for (let i = 0; i < fine.points.length; i += 1) {
-      if (!stableRegion || stableRegion(fine.points[i].x, fine.points[i].y)) stableIdx.push(i);
+      if (stableSubset(stableRegion, fine.points[i].x, fine.points[i].y, subsetHalf)) stableIdx.push(i);
     }
     const refit = fitTransformRobust(stableIdx.map((i) => fitPoints[i]), useHomography);
     if (!refit.transform) {
@@ -403,12 +412,13 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       matched: fine.points.length,
       rejected: fine.rejected,
       stableUsed: refit.inlierCount,
+      coarseStableUsed: first.inlierCount,
     });
   }
 
   const okFrames = frameSummaries.filter((f) => f.ok).length;
   if (!okFrames) {
-    return { ok: false, reason: 'どのフレームでも基準画像と相関が取れませんでした', frames: frameSummaries };
+    return { ok: false, reason: stableRegion ? '指定した安定域で位置合わせできませんでした。範囲と模様を確認してください' : 'どのフレームでも基準画像と相関が取れませんでした', frames: frameSummaries };
   }
 
   const cells = [];
@@ -470,7 +480,8 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
   // 視差の補正。立ち位置がずれると、面から出っ張った部分だけが余分に動く。
   // 段階1のホモグラフィは平面しか合わせられないので、ここまでの残差には
   // それが残ったまま（5m・凹凸20mm・横20cm のずれで 0.54mm ＝ 限界の5倍）
-  const parallaxSummary = parallax ? applyParallax(cells, parallax, { useHomography }) : null;
+  const parallaxSummary = parallax ? applyParallax(cells, parallax, { useHomography,
+    stableRegion: stableRegion ? (x, y) => stableSubset(stableRegion, x, y, subsetHalf) : null }) : null;
 
   // 有意判定。相関が切れかけのセル、影の縁をまたいだセルの変位は信用しない
   //（半端に掴んだ値が跳ねる）。視差を引いた分の推定誤差も限界に足す
@@ -509,6 +520,7 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     k,
     step,
     cells,
+    stableRegionSpecified: !!stableRegion,
     frames: frameSummaries,
     // 視差補正の顛末。効かせられなかったときも理由を持って返す（黙らない）
     parallax: parallaxSummary,
@@ -538,7 +550,7 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
  * そこに載っているセルの大半が本物に動いたブロックだったときに、当てはめが
  * 本物を視差と誤って説明してしまう（合成検証で 1.0mm の本物を丸ごと消した）。
  */
-function applyParallax(cells, config, { useHomography }) {
+function applyParallax(cells, config, { useHomography, stableRegion }) {
   const {
     camera, plane, intrinsics, heightAt, unitScaleToMM = 1000,
     // しきい値は合成検証から。凹凸が1ブロックだけの盤面が coverage 0.17〜0.19 /
@@ -549,7 +561,8 @@ function applyParallax(cells, config, { useHomography }) {
     return { ok: false, reason: '視差の補正に必要な点群の情報が足りません' };
   }
   const geo = cellGeometry(cells, { camera, plane, intrinsics, heightAt, unitScaleToMM });
-  const quality = leverageQuality(geo, cells);
+  const fitGeo = stableRegion ? geo.map((g) => g && stableRegion(cells[g.index].x, cells[g.index].y) ? g : null) : geo;
+  const quality = leverageQuality(fitGeo, cells);
   if (quality.coverage < minCoverage || quality.spread < minSpread) {
     return {
       ok: false,
@@ -557,7 +570,7 @@ function applyParallax(cells, config, { useHomography }) {
       reason: '凹凸が画面の一部に偏っているため、視差と本物の変位を分離できません',
     };
   }
-  return { ...correctParallax(cells, geo, { useHomography }), quality };
+  return { ...correctParallax(cells, geo, { useHomography, stableRegion }), quality };
 }
 
 /**

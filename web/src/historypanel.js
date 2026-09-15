@@ -38,7 +38,7 @@ export function initHistoryPanel(options = {}) {
     render();
   });
   $('obsRecord').addEventListener('click', recordObservation);
-  $('obsValueSource').addEventListener('change', renderRecordForm);
+  $('obsValueSource').addEventListener('change', () => { delete $('obsSigma').dataset.touched; renderRecordForm(); });
   $('obsSigma').addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
   $('historyExportJSON').addEventListener('click', exportJSON);
   $('historyExportCSV').addEventListener('click', exportCSV);
@@ -190,6 +190,7 @@ function recordObservation() {
     const updated = addObservation(station, {
       at: $('obsAt').value ? new Date($('obsAt').value).toISOString() : (m?.at ?? Date.now()),
       valueMM,
+      sourceKey: source === 'manual' ? null : m.pairs.find((p) => p.label === source)?.sourceKey ?? null,
       pairSigmaMM: sigmaMM,
       temperatureC: parseFloat($('obsTemp').value),
       weather: $('obsWeather').value,

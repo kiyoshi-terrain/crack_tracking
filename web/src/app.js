@@ -25,6 +25,7 @@ import {
 } from './capturepanel.js';
 import { saveBaseline } from './store.js';
 import { crackOpeningSeries, crackPatches, crackFrame, lineToLocal } from './crackline.js';
+import { targetScalePair, validateTargetIds, calibratedTargetPairs } from './targetmeasurement.js';
 import { APP_VERSION } from './version.js';
 
 const $ = (id) => document.getElementById(id);
@@ -35,6 +36,9 @@ const $ = (id) => document.getElementById(id);
 window.__JS_VERSION = APP_VERSION;
 
 const state = {
+  targetAnalysis: null,
+  targetPairs: [],
+  analysisStats: null,
   files: [],       // {file, exif, imageData, url, quality, focus}
   roi: null,
   preview: null,
@@ -79,6 +83,7 @@ $('cameraInput').addEventListener('change', (e) => {
 });
 
 $('clearBtn').addEventListener('click', () => {
+  invalidateMeasurement();
   state.files.forEach((f) => URL.revokeObjectURL(f.url));
   state.files = [];
   state.roi = null;
@@ -100,6 +105,7 @@ async function loadFiles(fileList) {
     (f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name)
   );
   if (!images.length) return;
+  invalidateMeasurement();
   images.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   // ファイルから読み込むときはライブ映像を閉じて、読み込んだ写真をファインダーに出す
   if (liveActive()) stopLive();
@@ -142,6 +148,7 @@ async function loadFiles(fileList) {
 }
 
 function removeFile(index) {
+  invalidateMeasurement();
   URL.revokeObjectURL(state.files[index].url);
   state.files.splice(index, 1);
   if (!state.files.length) {
@@ -595,16 +602,110 @@ function setupScale() {
 }
 
 for (const id of ['distance', 'focal35', 'referenceLength', 'focalTele', 'focalUltra']) {
-  $(id).addEventListener('input', () => { refreshCloudScale(); updateGSD(); });
+  $(id).addEventListener('input', () => { refreshCloudScale(); refreshTargetValues(); updateGSD(); });
 }
-$('referencePair').addEventListener('change', updateGSD);
+$('referencePair').addEventListener('change', () => { refreshTargetValues(); updateGSD(); });
+
+function invalidateMeasurement() {
+  state.targetAnalysis = null;
+  state.targetPairs = [];
+  state.analysisStats = null;
+  state.measurement = null;
+  state.lastResult = null;
+  state.limit = null;
+  state.crackPairs = [];
+  $('referencePair').innerHTML = '';
+  $('targetResults').innerHTML = '';
+  $('verdict').innerHTML = '';
+  $('stats').innerHTML = '';
+  refreshHistoryPanel();
+}
+
+function selectedTargetScale() {
+  const a = state.targetAnalysis;
+  return a && !validateTargetIds(a.assignments) ? targetScalePair(a.pairs, a.assignments, $('referencePair').value,
+    Number($('referenceLength').value)) : null;
+}
+
+function updateTargetScaleOptions(oldKey = $('referencePair').value) {
+  const a = state.targetAnalysis;
+  if (!a) return;
+  const allowed = a.pairs.filter((p) => {
+    const x = a.assignments[p.i], y = a.assignments[p.j];
+    return x.id.trim() && y.id.trim() && x.member.trim() && x.member.trim() === y.member.trim();
+  });
+  $('referencePair').innerHTML = '<option value="">同一部材の対を選択</option>' + allowed.map((p) =>
+    `<option value="${p.i}-${p.j}">${escapeHtml(a.assignments[p.i].id)} ↔ ${escapeHtml(a.assignments[p.j].id)}</option>`).join('');
+  if (allowed.some((p) => `${p.i}-${p.j}` === oldKey)) $('referencePair').value = oldKey;
+}
+
+function refreshTargetValues() {
+  const a = state.targetAnalysis;
+  state.targetPairs = a ? calibratedTargetPairs(a.pairs, a.series, a.assignments,
+    $('referencePair').value, Number($('referenceLength').value)) : [];
+  const el = $('targetCalibrated');
+  if (el && a) {
+    const error = validateTargetIds(a.assignments);
+    el.innerHTML = error || !state.targetPairs.length
+      ? `<p class="note">${escapeHtml(error ?? '縮尺用の対と実測距離をスケールシートで設定してください。有効な対応が2枚以上必要です。')}</p>`
+      : `<table><tr><th>現地IDの対</th><th>中心間距離 mm</th><th>繰返しSE＋床 mm</th><th>枚数</th></tr>${state.targetPairs.map((p) =>
+        `<tr><td>${escapeHtml(p.label)}</td><td>${p.meanMM.toFixed(4)}</td><td>${p.sigmaMM.toFixed(4)}</td><td>${p.frames}</td></tr>`).join('')}</table>
+        <p class="note">各写真内で縮尺を合わせた中心間距離です。き裂幅そのものではありません。撮影姿勢・取付け・基準距離の実測誤差は別途確認が必要です。</p>`;
+  }
+  if (state.analysisStats) renderVerdict(state.analysisStats.dicStats, state.analysisStats.targetSigma);
+}
+
+function renderTargetSetup() {
+  const a = state.targetAnalysis;
+  if (!a) return;
+  $('targetResults').insertAdjacentHTML('afterbegin', `
+    <h3 class="sec">検出番号と現地IDの照合</h3>
+    <p class="note">図の番号は今回の検出番号です。現地の番号を自動では読みません。写真セットごとに照合してください。
+    部材IDは、相互に動かない同じ石・同じ板にだけ同じ名前を付けます（左右の区分だけでは不十分です）。</p>
+    <canvas id="targetIdentityCanvas" style="width:100%;height:auto"></canvas>
+    <table><tr><th>図の番号</th><th>現地ID</th><th>部材ID</th><th>黒丸径 px</th></tr>${a.targets.map((t, i) =>
+      `<tr><td>${i + 1}</td><td><input data-target-id="${i}" aria-label="検出${i + 1}の現地ID" value="${escapeHtml(a.assignments[i].id)}" placeholder="例 L1"></td>
+       <td><input data-target-member="${i}" aria-label="検出${i + 1}の部材ID" value="${escapeHtml(a.assignments[i].member)}" placeholder="例 石A"></td><td>${(2 * t.radius).toFixed(1)}</td></tr>`).join('')}</table>
+    <div id="targetCalibrated"></div>
+    <p class="note">現地IDと縮尺を設定した対が経時管理に渡ります。自動の位置・傾き補正は行いません。</p>`);
+  const canvas = $('targetIdentityCanvas');
+  const factor = Math.min(1, 760 / a.reference.width);
+  canvas.width = Math.round(a.reference.width * factor);
+  canvas.height = Math.round(a.reference.height * factor);
+  const source = document.createElement('canvas');
+  source.width = state.files[0].imageData.width;
+  source.height = state.files[0].imageData.height;
+  source.getContext('2d').putImageData(state.files[0].imageData, 0, 0);
+  const roi = clampRegion(a.roi ?? { x: 0, y: 0, width: source.width, height: source.height }, source.width, source.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, roi.x, roi.y, roi.width, roi.height, 0, 0, canvas.width, canvas.height);
+  ctx.font = 'bold 16px sans-serif';
+  a.targets.forEach((t, i) => {
+    const x = t.x * factor, y = t.y * factor;
+    ctx.strokeStyle = '#ffb454'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, t.radius * factor + 4, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+    ctx.strokeText(String(i + 1), x + 8, y - 8);
+    ctx.fillStyle = '#ffb454'; ctx.fillText(String(i + 1), x + 8, y - 8);
+  });
+  source.width = source.height = 0;
+  for (const [attr, key] of [['data-target-id', 'id'], ['data-target-member', 'member']]) {
+    $('targetResults').querySelectorAll(`[${attr}]`).forEach((input) => input.addEventListener('input', () => {
+      a.assignments[Number(input.getAttribute(attr))][key] = input.value.trim();
+      updateTargetScaleOptions();
+      refreshTargetValues();
+      updateGSD();
+    }));
+  }
+  refreshTargetValues();
+}
 
 function currentGSD() {
   if (!state.files.length) return null;
   // 既知の基準距離があればそちらを優先する。
   // レーザー距離計も焦点距離も要らず、印刷倍率やレンズの個体差も吸収できるため。
   const referenceMM = parseFloat($('referenceLength').value);
-  const referencePx = parseFloat($('referencePair').value);
+  const referencePx = selectedTargetScale()?.distance;
   if (referenceMM > 0 && referencePx > 0) return referenceMM / referencePx;
 
   // 次に点群。距離だけでなく斜角も入るので、距離計＋焦点距離より確か。
@@ -686,7 +787,7 @@ function updateGSD() {
 
 function gsdSourceName() {
   const referenceMM = parseFloat($('referenceLength').value);
-  const referencePx = parseFloat($('referencePair').value);
+  const referencePx = selectedTargetScale()?.distance;
   if (referenceMM > 0 && referencePx > 0) return '既知の基準距離';
   if (cloudGSD() > 0) return '点群（斜め補正あり）';
   return '撮影距離 × 焦点距離';
@@ -726,13 +827,13 @@ initHistoryPanel({
 
 initComparePanel({
   getFrames: () => state.files,
-  getGsd: () => currentGSD(),
   getRoi: () => state.roi,
   getLens: () => lensForCurrentPhotos(),
   // 2時期比較で出た亀裂の開口を、σ 実測の結果と同じ棚に置く。
   // 経時管理はここから拾うだけで、比較の中身には関与しない
   onMeasurement: (m) => {
-    state.measurement = { ...m, at: exifDateISO(m.atExif) ?? new Date().toISOString() };
+    state.analysisStats = null;
+    state.measurement = m ? { ...m, at: m.at ?? exifDateISO(m.atExif) ?? new Date().toISOString() } : null;
     refreshHistoryPanel();
     updateSteps();
   },
@@ -1149,6 +1250,7 @@ function setRoi(roi) {
   const { imageData } = state.files[0];
   const clamped = clampRegion(roi, imageData.width, imageData.height);
   if (clamped.width < 80 || clamped.height < 80) return;
+  if (JSON.stringify(state.roi) !== JSON.stringify(clamped)) invalidateMeasurement();
   state.roi = clamped;
 
   const rect = state.preview.canvas.getBoundingClientRect();
@@ -1366,6 +1468,7 @@ async function runMeasurement() {
  * （スケールシート）・点群・基準距離のどれかに任せる。
  */
 async function setLiveFrames(records) {
+  invalidateMeasurement();
   state.files.forEach((f) => URL.revokeObjectURL(f.url));
   state.files = [];
   state.lensMultiplier = lensMultiplierNow();
@@ -1395,6 +1498,9 @@ async function analyze() {
   const useHomography = $('model').value === 'homography';
   const method = $('method').value;
   const roi = state.roi;
+  state.analysisStats = null;
+  state.measurement = null;
+  state.targetPairs = [];
 
   log('基準画像を準備中…');
   await tick();
@@ -1404,6 +1510,8 @@ async function analyze() {
   if (method === 'targets' || method === 'both') {
     targetSigma = await analyzeTargets(reference, channel, roi);
   } else {
+    state.targetAnalysis = null;
+    $('referencePair').innerHTML = '';
     $('targetResults').innerHTML = '';
   }
 
@@ -1475,6 +1583,8 @@ async function analyze() {
   }
 
   log('');
+  state.analysisStats = { dicStats, targetSigma };
+  refreshTargetValues();
   renderVerdict(dicStats, targetSigma);
   renderCrackResults(currentGSD());
   updateSteps();
@@ -1490,7 +1600,7 @@ function renderVerdict(dicStats, targetSigma) {
   // DIC とターゲットの両方が出ていれば、精度の良い方を代表値にする
   const candidates = [
     dicStats ? { name: 'DIC', sigma: dicStats.sigma } : null,
-    targetSigma != null && isFinite(targetSigma) ? { name: 'ターゲット', sigma: targetSigma } : null,
+    targetSigma != null && isFinite(targetSigma) ? { name: 'ターゲット', sigma: targetSigma / Math.SQRT2 } : null,
   ].filter(Boolean);
 
   if (!candidates.length) {
@@ -1514,7 +1624,7 @@ function renderVerdict(dicStats, targetSigma) {
     // 2時期を比べるときに必要なのは「1測点」ではなく「き裂を挟む2点」の σ
     pairSigmaMM: limit.pairSigmaMM,
     pairs: [
-      ...(state.targetPairs ?? []).map((p) => ({ ...p, meanMM: p.meanPx * gsd })),
+      ...(state.targetPairs ?? []),
       // 亀裂測点。基準日は「開口 0 ± σ」として記録され、次回の比較で変化が乗る
       ...(state.crackPairs ?? []).filter((p) => p.ok !== false).map((p) => ({
         ...p, meanMM: p.meanPx * gsd, sigmaMM: p.sigmaPx * gsd,
@@ -1535,10 +1645,10 @@ function renderVerdict(dicStats, targetSigma) {
 
   $('verdict').innerHTML = `
     <div class="eyebrow">この機材・この条件での検出限界</div>
-    <div class="answer"><b>${value.toFixed(gsd ? 3 : 4)}</b> ${unit} より大きい変化なら、ノイズと区別できます。</div>
+    <div class="answer"><b>${value.toFixed(gsd ? 3 : 4)}</b> ${unit}（繰返しノイズからの目安）</div>
     <div class="sub">
       ${frames} 枚平均・3σ 基準${gsd ? '' : '（撮影距離を入力すると mm で表示します）'}。
-      これを下回る変化は「有意差なし」と判断してください。
+      姿勢・縮尺・取付けの誤差は含みません。実写で既知量を動かして確認してください。
       ${candidates.length > 1 ? `代表値は精度の良い <strong>${best.name}</strong> 方式を採用。` : ''}
     </div>`;
 
@@ -1619,6 +1729,9 @@ async function analyzeTargets(reference, channel, roi) {
 
   const referenceTargets = detectTargets(reference, { backgroundRadius: 60 });
   if (referenceTargets.length < 2) {
+    state.targetAnalysis = null;
+    state.targetPairs = [];
+    $('referencePair').innerHTML = '';
     $('targetResults').innerHTML = `<div class="banner bad"><div>
       基準画像からターゲットを ${referenceTargets.length} 点しか検出できませんでした。
       解析範囲にターゲット全体が入っているか、白地に黒丸として写っているか確認してください。
@@ -1654,26 +1767,23 @@ async function analyzeTargets(reference, channel, roi) {
     });
   }
 
-  // 既知距離からスケールを決めるための選択肢
-  $('referencePair').innerHTML = '<option value="">選択しない</option>' +
-    referencePairs.map((p) => `<option value="${p.distance}">対 ${p.i + 1}–${p.j + 1}（${p.distance.toFixed(2)} px）</option>`).join('');
+  const previous = state.targetAnalysis;
+  const sameReference = previous?.file === state.files[0].file && previous.roiKey === JSON.stringify(roi);
+  const assignments = sameReference && previous.assignments.length === referenceTargets.length
+    ? previous.assignments : referenceTargets.map(() => ({ id: '', member: '' }));
+  state.targetAnalysis = { file: state.files[0].file, roiKey: JSON.stringify(roi),
+    targets: referenceTargets, pairs: referencePairs, series, assignments, reference, roi };
+  const oldKey = sameReference ? $('referencePair').value : '';
+  updateTargetScaleOptions(oldKey);
   $('referenceScale').classList.remove('hidden');
 
-  const gsd = currentGSD();
   const rows = referencePairs.map((pair, k) => {
     const values = series[k].filter((v) => isFinite(v));
     const mean = values.reduce((s, v) => s + v, 0) / Math.max(1, values.length);
     return { pair, values, mean, sigma: robustSigmaOf(values), span: values.length ? Math.max(...values) - Math.min(...values) : 0 };
   });
 
-  // 経時管理では「どの対を測点の量とするか」を選ばせるので、対ごとの結果を残す
-  state.targetPairs = rows.map((r) => ({
-    label: `${r.pair.i + 1}–${r.pair.j + 1}`,
-    meanPx: r.mean,
-    sigmaPx: r.sigma,
-  }));
-
-  const sigmas = rows.map((r) => r.sigma).filter((s) => isFinite(s) && s > 0).sort((a, b) => a - b);
+  const sigmas = rows.filter((r) => r.values.length >= 2).map((r) => r.sigma).filter((s) => isFinite(s) && s >= 0).sort((a, b) => a - b);
   const medianSigma = sigmas.length ? sigmas[sigmas.length >> 1] : NaN;
 
   $('targetResults').innerHTML = `
@@ -1681,17 +1791,16 @@ async function analyzeTargets(reference, channel, roi) {
     <div class="banner ${referenceTargets.length >= 4 ? 'good' : 'warn'}"><div>
       基準画像で <strong>${referenceTargets.length} 点</strong>検出。対ごとの距離の σ（中央値）
       <span class="mono">${isFinite(medianSigma) ? medianSigma.toFixed(4) : '—'} px</span>
-      ${gsd && isFinite(medianSigma) ? `= <span class="mono">${(medianSigma * gsd).toFixed(4)} mm</span>` : ''}
     </div></div>
     <div class="scroll-x"><table>
       <tr><th>枚</th><th class="num">検出</th><th class="num">対応付け</th></tr>
       ${perFrame.map((p) => `<tr><td>${p.frame === 0 ? '基準' : p.frame}</td><td class="num">${p.detected}</td><td class="num">${p.matched}</td></tr>`).join('')}
     </table></div>
     <div class="scroll-x" style="margin-top:12px"><table>
-      <tr><th>対</th><th class="num">平均距離</th><th class="num">σ</th><th class="num">最大−最小</th><th class="num">各枚の値(px)</th></tr>
+      <tr><th>対</th><th class="num">平均距離 px</th><th class="num">σ px</th><th class="num">最大−最小 px</th><th class="num">各枚の値(px)</th></tr>
       ${rows.map((r) => `<tr>
         <td>${r.pair.i + 1}–${r.pair.j + 1}</td>
-        <td class="num">${r.mean.toFixed(3)}${gsd ? ` (${(r.mean * gsd).toFixed(3)} mm)` : ''}</td>
+        <td class="num">${r.mean.toFixed(3)}</td>
         <td class="num">${isFinite(r.sigma) ? r.sigma.toFixed(4) : '—'}</td>
         <td class="num">${r.span.toFixed(4)}</td>
         <td class="num" style="font-size:11px">${r.values.map((v) => v.toFixed(3)).join(', ')}</td>
@@ -1700,6 +1809,7 @@ async function analyzeTargets(reference, channel, roi) {
     <p class="note">既知量を動かして撮った場合、「各枚の値」に段差として現れます。
     段差を σ と混同しないよう、動かす前後は別々に解析してください。</p>`;
 
+  renderTargetSetup();
   return medianSigma;
 }
 

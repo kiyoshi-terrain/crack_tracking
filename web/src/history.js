@@ -366,7 +366,12 @@ export function addObservation(station, observation) {
   if (!Number.isFinite(at)) throw new Error('日時が読めません');
   if (!Number.isFinite(observation.valueMM)) throw new Error('計測値が数値ではありません');
 
+  const sourceKey = observation.sourceKey ?? null;
+  if (station.observations.some((o) => (o.sourceKey ?? null) !== sourceKey)) {
+    throw new Error('計測対象または縮尺の基準が異なります。現地IDと基準距離を確認し、別の対象は新しい測点に記録してください。旧記録はIDを確認できないため自動で接続しません');
+  }
   const record = {
+    sourceKey,
     at: new Date(at).toISOString(),
     valueMM: observation.valueMM,
     pairSigmaMM: Number.isFinite(observation.pairSigmaMM) ? observation.pairSigmaMM : null,
