@@ -23,7 +23,7 @@ export function createAlignmentEditor({ canvas, editButton, clearButton, info, o
     }
     box(drag?.rect ?? roi, '#55c6ff');
     for (const p of diagnostics?.points ?? []) {
-      ctx.beginPath(); ctx.fillStyle = p.status === 'used' ? '#70f080' : p.status === 'outlier' ? '#ff7d58' : p.status === 'matched' ? '#ffd166' : '#aaaaaa';
+      ctx.beginPath(); ctx.fillStyle = p.status === 'check' ? '#d8a0ff' : p.status === 'used' ? '#70f080' : p.status === 'outlier' ? '#ff7d58' : p.status === 'matched' ? '#ffd166' : '#aaaaaa';
       ctx.arc(p.x * sx, p.y * sy, p.status === 'used' ? 3 : 2, 0, Math.PI * 2); ctx.fill();
     }
   }

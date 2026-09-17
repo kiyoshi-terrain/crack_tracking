@@ -22,6 +22,7 @@ import { measureDisplacementField, estimateGlobalShift } from './dic.js';
 import { fitAffine, fitHomography, applyAffine, applyHomography, residuals } from './transform.js';
 import { undistortPoint, isIdentity } from './lenscal.js';
 import { cellGeometry, correctParallax, leverageQuality } from './parallax.js';
+import { searchReferenceRegion, splitRegistrationPoints, registrationQuality } from './registration.js';
 
 function median(values) {
   if (!values.length) return 0;
@@ -241,6 +242,11 @@ function alignmentDiagnostics(field, selected, predicate, radius, scale = 1) {
     matched: points.filter((p) => p.status !== 'unmatched').length };
 }
 
+function markCheckPoints(diagnostic, points, scale = 1) {
+  const keys = new Set(points.map(p => `${p.x * scale},${p.y * scale}`));
+  for (const p of diagnostic.points) if (keys.has(`${p.x},${p.y}`)) p.status = 'check';
+}
+
 export async function measureEpochChange(referenceA, framesB, options = {}) {
   const {
     subsetHalf = 15,
@@ -249,6 +255,9 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     useHomography = true,
     region = null,
     stableRegion = null,
+    // 専用基準枠と品質ゲート。計算に使わない検査点を別に確保する。
+    alignmentRegion = null,
+    alignmentQuality = null,
     sigmaAPx = null,
     k = 3,
     coarseSearch = 40,
@@ -292,13 +301,23 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     // 全フレームのグレースケールを同時に持つとメモリが持たないため
     const provided = framesB[fi];
     const frame = typeof provided === 'function' ? await provided() : provided;
+    let seed = null;
+    if (alignmentQuality) {
+      if (!alignmentRegion || !downsample || frame.width !== referenceA.width || frame.height !== referenceA.height) {
+        frameSummaries.push({ ok: false, alignment: {}, reason: '品質検査には専用基準枠と同じ画像寸法が必要です' }); continue;
+      }
+      seed = searchReferenceRegion(referenceA, frame, alignmentRegion, downsample);
+      if (!seed.ok) {
+        frameSummaries.push({ ok: false, alignment: { seed }, reason: seed.reason }); continue;
+      }
+    }
 
     // 段階1: 粗い格子・広い窓で変換を掴む（coarseScale 指定時は縮小画像で）
     const smallF = coarseScale > 1 && downsample ? downsample(frame, coarseScale) : frame;
     // 探索半径は縮小後の寸法に合わせる。縮小前の 400px をそのまま渡すと、
     // 縮小画像では探索点が全部画面外に落ちて confidence 0 で黙り、
     // 手持ちで 40px ずれただけで「相関が取れません」になる
-    const shift = downsample
+    const shift = seed ? { dx: seed.dx / coarseScale, dy: seed.dy / coarseScale } : downsample
       ? estimateGlobalShift(smallA, smallF, downsample, {
         maxShiftPx: Math.min(Math.ceil(400 / coarseScale),
           Math.floor(Math.min(smallA.width, smallA.height) / 8)),
@@ -313,22 +332,35 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
       searchRange: Math.max(10, Math.round(coarseSearch / coarseScale)),
       minZNCC: Math.min(0.55, minZNCC),
       initialShift: shift,
+      ...(alignmentQuality ? { region: { x: alignmentRegion.x / coarseScale, y: alignmentRegion.y / coarseScale,
+        width: alignmentRegion.width / coarseScale, height: alignmentRegion.height / coarseScale } } : {}),
     });
     // 当てはめの自由度が確保できる点数か（アフィン6・ホモグラフィ8 + 余裕）
     const firstPoints = coarse.points.filter((p) => stableSubset(stableRegion,
       p.x * coarseScale, p.y * coarseScale, subsetHalf * coarseScale));
-    const alignment = { coarse: alignmentDiagnostics(coarse, [], stableRegion, subsetHalf, coarseScale) };
+    const alignment = { seed, coarse: alignmentDiagnostics(coarse, [], stableRegion, subsetHalf, coarseScale) };
     if (firstPoints.length < (useHomography ? 10 : 8)) {
       frameSummaries.push({ ok: false, matched: coarse.points.length, alignment, reason: '粗い位置合わせの基準対応点が不足' });
       continue;
     }
-    const first = fitTransformRobust(firstPoints, useHomography);
+    const firstSplit = alignmentQuality ? splitRegistrationPoints(firstPoints, Math.max(10, Math.round(step * 2 / coarseScale))) : { train: firstPoints, check: [] };
+    const first = fitTransformRobust(firstSplit.train, useHomography);
     if (!first.transform) {
       frameSummaries.push({ ok: false, matched: coarse.points.length, alignment, reason: '粗い位置合わせの変換を推定できず' });
       continue;
     }
 
-    alignment.coarse = alignmentDiagnostics(coarse, first.inlierIndices.map((i) => firstPoints[i]), stableRegion, subsetHalf, coarseScale);
+    alignment.seed = seed;
+    const coarseUsed = first.inlierIndices.map((i) => firstSplit.train[i]);
+    alignment.coarse = alignmentDiagnostics(coarse, coarseUsed, stableRegion, subsetHalf, coarseScale);
+    if (alignmentQuality) {
+      alignment.coarse.quality = registrationQuality(coarseUsed, firstSplit.check, first.transform, useHomography,
+        { maxErrorPx: 2, minSpanPx: 40 / coarseScale });
+      markCheckPoints(alignment.coarse, firstSplit.check, coarseScale);
+      if (!alignment.coarse.quality.ok) {
+        frameSummaries.push({ ok: false, alignment, reason: `粗い位置合わせ：${alignment.coarse.quality.reason}` }); continue;
+      }
+    }
     const applySmall = useHomography
       ? (x, y) => applyHomography(first.transform, x, y)
       : (x, y) => applyAffine(first.transform, x, y);
@@ -385,11 +417,22 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
     for (let i = 0; i < fine.points.length; i += 1) {
       if (stableSubset(stableRegion, fine.points[i].x, fine.points[i].y, subsetHalf)) stableIdx.push(i);
     }
-    const refit = fitTransformRobust(stableIdx.map((i) => fitPoints[i]), useHomography);
-    alignment.fine = alignmentDiagnostics(fine, refit.inlierIndices.map((i) => fine.points[stableIdx[i]]), stableRegion, subsetHalf);
+    const stablePoints = stableIdx.map((i) => fitPoints[i]);
+    const fineSplit = alignmentQuality ? splitRegistrationPoints(stablePoints, step) : { train: stablePoints, check: [] };
+    const refit = fitTransformRobust(fineSplit.train, useHomography);
+    const fineUsed = refit.inlierIndices.map((i) => fineSplit.train[i]);
+    const originalPoint = (p) => fine.points[fitPoints.indexOf(p)];
+    alignment.fine = alignmentDiagnostics(fine, fineUsed.map(originalPoint), stableRegion, subsetHalf);
     if (!refit.transform) {
       frameSummaries.push({ ok: false, matched: fine.points.length, alignment, reason: '精密な位置合わせの基準点不足または変換を推定できず' });
       continue;
+    }
+    if (alignmentQuality) {
+      alignment.fine.quality = registrationQuality(fineUsed, fineSplit.check, refit.transform, useHomography, alignmentQuality);
+      markCheckPoints(alignment.fine, fineSplit.check.map(originalPoint));
+      if (!alignment.fine.quality.ok) {
+        frameSummaries.push({ ok: false, alignment, reason: `精密な位置合わせ：${alignment.fine.quality.reason}` }); continue;
+      }
     }
     const res = residuals(refit.transform, fitPoints);
 
@@ -432,6 +475,8 @@ export async function measureEpochChange(referenceA, framesB, options = {}) {
   }
 
   const okFrames = frameSummaries.filter((f) => f.ok).length;
+  if (alignmentQuality && okFrames < 2) return { ok: false,
+    reason: '品質検査に合格した写真が2枚未満です。変化量は確定しません', frames: frameSummaries };
   if (!okFrames) {
     return { ok: false, reason: stableRegion ? '指定した安定域で位置合わせできませんでした。範囲と模様を確認してください' : 'どのフレームでも基準画像と相関が取れませんでした', frames: frameSummaries };
   }

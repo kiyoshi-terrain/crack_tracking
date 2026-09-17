@@ -19,6 +19,7 @@ import { runLensCalTests } from './lenscal.mjs';
 import { runCloudAlignTests } from './cloudalign.mjs';
 import { runParallaxTests } from './parallax.mjs';
 import { runFieldReadinessTests } from './field-readiness.mjs';
+import { runRegistrationTests } from './registration.mjs';
 import { runCrackLineTests } from './crackline.mjs';
 import { readdirSync, readFileSync } from 'node:fs';
 
@@ -243,6 +244,7 @@ runCloudAlignTests(check, near);
 runParallaxTests(check, near);
 runCrackLineTests(check, near);
 await runFieldReadinessTests(check, near);
+await runRegistrationTests(check, near);
 
 // ---------------------------------------------------------------- 飽和は sRGB で判定
 console.log('\n== 飽和の判定（線形光の暗いグレーは黒つぶれではない） ==');

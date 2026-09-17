@@ -218,8 +218,14 @@ function renderAlignment(result) {
   const count = (stage) => stage ? `${stage.used} / ${stage.matched} / ${stage.candidates}` : '—';
   $('compareAlignmentCounts').innerHTML = '<table><tr><th>写真</th><th>粗い位置合わせ</th><th>精密な位置合わせ</th><th>結果</th></tr>'
     + alignmentFrames.map((f, i) => `<tr><td>${i + 1}</td><td>${count(f.alignment?.coarse)}</td><td>${count(f.alignment?.fine)}</td>`
-      + `<td>${escapeHtml(f.ok ? '成立' : f.reason ?? '不成立')}</td></tr>`).join('') + '</table>'
+      + `<td>${escapeHtml(f.ok ? '成立' : `不成立：${f.reason ?? '位置合わせを確認できず'}`)}</td></tr>`).join('') + '</table>'
     + '<p class="note">各欄は「採用点 / 対応成立点 / 基準域内の探索点」。小画像での粗い推定は対応点10点以上が必要です。境界をまたぐ画像片は含めません。未実行の段階は — です。</p>';
+  const qualityText = (f) => {
+    const q = f.alignment?.fine?.quality, seed = f.alignment?.seed;
+    return (seed ? `初期照合 ${Number.isFinite(seed.score) ? seed.score.toFixed(3) : '—'}・候補差 ${Number.isFinite(seed.ambiguity) ? seed.ambiguity.toFixed(3) : '—'}` : '初期照合 —')
+      + (q ? ` ／ 独立検査 ${q.checkCount}点・残差90%点 ${Number.isFinite(q.p90Px) ? q.p90Px.toFixed(3) + ' px' : '—'}` : ' ／ 精密検査未実行');
+  };
+  $('compareAlignmentCounts').innerHTML += '<p class="note">' + alignmentFrames.map((f,i)=>`${i+1}枚目：${escapeHtml(qualityText(f))}`).join('<br>') + '</p>';
   $('compareAlignmentStage').value = alignmentFrames[0].alignment?.fine ? 'fine' : 'coarse';
   drawAlignmentPoints();
 }
@@ -303,6 +309,8 @@ async function run() {
       minZNCC: 0.7,
       useHomography: true,
       stableRegion,
+      alignmentRegion: stableMode === 'inside' ? alignment.roi : null,
+      alignmentQuality: stableMode === 'inside' ? { maxErrorPx: 1 } : null,
       sigmaAPx,
       downsample,
       // 4000px 級では段階1を縮小画像で回す
@@ -336,7 +344,7 @@ async function run() {
     }));
 
     render(result, grayA, {
-      sigmaAPx, usedFrames: used.length, totalFrames: frames.length, crackRows, frames: used,
+      sigmaAPx, usedFrames: result.frames.filter(f => f.ok).length, totalFrames: frames.length, crackRows, frames: used,
     });
   } catch (err) {
     if (runRevision !== revision) return;
@@ -376,6 +384,8 @@ function render(result, grayA, context) {
   }
 
   // 影の移動は本物と同じ大きさの偽の変位を作る（合成検証で σ の 400 倍・1.1px 級）。
+  const failedFrames = result.frames.filter(f => !f.ok).length;
+  if (failedFrames) verdict += `<div class="banner warn"><div>位置合わせに不合格の ${failedFrames} 枚を除外しました。対応点の表で理由を確認してください。</div></div>`;
   // 落としたことを黙っていると、判定できていない場所が「変化なし」に化ける
   const litCells = result.stats.illuminationChanged ?? 0;
   if (litCells > 0) {

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-version="v32">
+<html lang="ja" data-version="v33">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -921,11 +921,12 @@
           <div><label for="compareAlignmentFrame">対応点を表示する今回写真</label><select id="compareAlignmentFrame"></select></div>
           <div><label for="compareAlignmentStage">位置合わせの段階</label><select id="compareAlignmentStage"><option value="fine">精密な位置合わせ</option><option value="coarse">粗い位置合わせ</option></select></div>
         </div>
-        <p class="note">緑：変換の推定に採用。赤：対応したが外れ値として除外。灰：対応が成立せず。黄：対応はあるが変換推定が不成立。点数が足りても、偏った分布や基準部分の動きによる誤差は残ります。</p>
+        <p class="note">緑：変換の推定に採用。紫：変換の計算に使わない独立検査点。赤：対応したが外れ値として除外。灰：対応が成立せず。黄：対応はあるが変換推定が不成立。</p>
         <div id="compareAlignmentCounts" class="scroll-x"></div>
       </div>
 
       <label for="compareReferenceGsd">基準写真の縮尺（mm/px）</label>
+      <p class="note">青枠の比較では構図のずれを広域探索し、独立検査点で確認します。精密検査の残差90%点が基準写真の1pxを超える写真、模様が紛らわしい写真、点の分布が狭い写真は除外します。合格2枚未満では計測を止めます。これは暫定の画像品質基準で、1px以下の計測精度や部材の不動を保証しません。枠外への補正、奥行き差、レンズ歪みの影響も残ります。</p>
       <input type="number" id="compareReferenceGsd" min="0" step="any" inputmode="decimal" placeholder="保存した基準から自動入力／不明なら px 表示">
       <p class="note">変位は基準写真の座標で算出します。今回の写真の縮尺と取り違えないでください。</p>
       <button class="primary wide" id="compareRun" style="margin-top:12px">変化を抽出する</button>
