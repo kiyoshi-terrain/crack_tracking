@@ -138,7 +138,7 @@
 
     <p class="eyebrow">手順</p>
     <ol class="steps">
-      <li>破線で切り、<strong>固定側 A</strong> だけを壁や板にしっかり貼る。この3点が剛体基準になり、カメラの動きはここから除去されます</li>
+      <li>破線で切り、<strong>固定側 A</strong> だけを壁や板にしっかり貼る。A側は試験中動かしません。カメラも固定してください（ターゲットによる姿勢の自動補正はありません）</li>
       <li><strong>可動側 B</strong> を隣に、隙間を空けて仮止めする</li>
       <li>A1–A3 の実距離を<em>ノギスで実測</em>する。印刷倍率の誤差を吸収するため、設計値ではなく実測値を使います</li>
       <li>動かさずに 10〜20 枚撮る → <em>σ（測定ノイズ）</em>が出ます</li>
@@ -154,8 +154,7 @@
       <dt>設計間隔</dt><dd>120.0 mm（縦・横とも）</dd>
     </dl>
     <p style="font-size:13px;color:var(--ink-soft);margin-top:14px">
-      「両方」を選ぶと DIC と併走します。両者が食い違えば、
-      ターゲットが浮いている（接着不良）疑いがあります。
+      「両方」は別々の方式のσを表示します。計測量が異なるため、σの差だけで接着不良を判定することはできません。
     </p>
 
     <p class="eyebrow">段差とσを混同しないこと</p>
@@ -194,7 +193,7 @@
 
         <!-- 固定側 -->
         <text x="20" y="62" font-family="sans-serif" font-size="3.8" font-weight="bold" fill="#000">固定側 A</text>
-        <text x="20" y="67" font-family="sans-serif" font-size="2.7" fill="#444">貼って動かさない（剛体基準）</text>
+        <text x="20" y="67" font-family="sans-serif" font-size="2.7" fill="#444">試験中は貼って動かさない</text>
         <circle cx="45" cy="90"  r="7.5" fill="#000"/>
         <circle cx="45" cy="150" r="7.5" fill="#000"/>
         <circle cx="45" cy="210" r="7.5" fill="#000"/>

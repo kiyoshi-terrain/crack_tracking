@@ -241,7 +241,7 @@ export function leverageQuality(geo, cells) {
  * @param {Array<{du:number,dv:number}>} cells geo と同じ並びのセル
  */
 export function estimateBaselineShift(geo, cells, {
-  useHomography = true, rounds = 3, tukey = 4.685,
+  useHomography = true, rounds = 3, tukey = 4.685, stableRegion = null,
 } = {}) {
   const nn = useHomography ? 8 : 6;
   const m = 3 + nn;
@@ -251,6 +251,7 @@ export function estimateBaselineShift(geo, cells, {
     const c = cells[g.index];
     if (!c || c.du == null || c.dv == null) continue;
     if (c.decorrelated || c.illuminationChanged) continue;
+    if (stableRegion && !stableRegion(c.x, c.y)) continue;
     for (let axis = 0; axis < 2; axis += 1) {
       const a = new Float64Array(m);
       if (axis === 0) { a[0] = -g.f * g.g; a[2] = g.g * g.xc; } else { a[1] = -g.f * g.g; a[2] = g.g * g.yc; }
@@ -298,6 +299,7 @@ export function estimateBaselineShift(geo, cells, {
     useHomography,
     m,
     solution: sol,
+    stableIndices: stableRegion ? new Set(geo.filter((g) => g && stableRegion(cells[g.index].x, cells[g.index].y)).map((g) => g.index)) : null,
     sigma2,
     // 立ち位置のずれ（カメラ座標系・mm）。x=右, y=下, z=前
     shiftMM: { x: sol.x[0], y: sol.x[1], z: sol.x[2] },
@@ -339,7 +341,8 @@ export function parallaxField(geo, fit) {
     }
   }
   // 視差モデルへの変換の当てはめ（重みは一様でよい。モデル自体は滑らか）
-  const projRows = model.map((r) => ({ a: r.nu, y: r.value, w: 1 }));
+  const projRows = model.filter((r) => !fit.stableIndices || fit.stableIndices.has(r.g.index))
+    .map((r) => ({ a: r.nu, y: r.value, w: 1 }));
   const proj = solveNormal(projRows, nn);
 
   for (const r of model) {

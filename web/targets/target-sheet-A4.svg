@@ -76,7 +76,7 @@
   <text x="14" y="272" font-family="sans-serif" font-size="3.1" fill="#000">5. B側だけを既知量ずらす（すきまゲージ0.10mm等を挟む）→ もう10枚撮る</text>
   <text x="14" y="277" font-family="sans-serif" font-size="3.1" fill="#000">6. ツールが「その既知量」を当てられるか確認する</text>
   <text x="14" y="284" font-family="sans-serif" font-size="2.9" fill="#666">※ 設計値120mmは印刷倍率でずれます。必ず実測値を使ってください。</text>
-  <text x="14" y="289" font-family="sans-serif" font-size="2.9" fill="#666">※ A側の3点は剛体基準です。カメラの動きはこの3点から除去されます。</text>
+  <text x="14" y="289" font-family="sans-serif" font-size="2.9" fill="#666">※ A側は試験中固定。カメラも固定してください（姿勢の自動補正なし）。</text>
 
   <!-- ── 四隅の見当（用紙が正しく出たかの確認）── -->
   <g stroke="#000" stroke-width="0.3" fill="none">

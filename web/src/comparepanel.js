@@ -6,8 +6,8 @@
  * 判定はすべて change.js（純粋ロジック・検証済み）に任せ、
  * ここは入出力と描画だけを持つ。
  *
- * 基準セットはツールに保存しない。前回の連写をフォルダごと取っておいて、
- * 毎回ここへ読み込む運用（画像を localStorage に入れると容量が破綻する）。
+ * 基準セットは端末のIndexedDBから選ぶか、前回の写真をファイルから読み込む。
+ * 専用の位置合わせ枠は、保存済み基準のメタ情報だけを更新して保持する。
  */
 
 import { measureEpochChange, groupSignificant, fitTransformRobust } from './change.js';
@@ -16,9 +16,11 @@ import { measureDisplacementField, estimateGlobalShift } from './dic.js';
 import { residuals } from './transform.js';
 import { summarize, median } from './sigma.js';
 import { crackOpeningEpoch, crackFrame } from './crackline.js';
-import { listBaselines, getBaseline } from './store.js';
+import { listBaselines, getBaseline, updateBaselineAlignment } from './store.js';
 import { setBaseline as setCaptureBaseline, liveActive, toggleLive } from './capturepanel.js';
 import { closeSheet } from './shell.js';
+import { createAlignmentEditor } from './alignmentpanel.js';
+import { alignmentPredicate } from './alignmentregion.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,43 +28,49 @@ const $ = (id) => document.getElementById(id);
 const MAX_FRAMES_B = 5;
 
 let getFrames = () => [];
-let getGsd = () => null;
-let getRoi = () => null;
 let getLens = () => null;
 let getSurface = () => null;
 let onChange = () => {};
 let baseFiles = [];
+let baselineRow = null, alignmentEditor = null, alignmentFrames = [];
+let revision = 0, loadGeneration = 0, loading = false, running = false, saving = false;
 let baseCracks = [];      // 基準に保存された亀裂測点の線（基準画像の画素座標）
 let onMeasurement = () => {};
 let lastOutcome = null;   // 'changed' | 'surface' | 'quiet' | null
 
 export function initComparePanel(options = {}) {
   getFrames = options.getFrames ?? (() => []);
-  getGsd = options.getGsd ?? (() => null);
-  getRoi = options.getRoi ?? (() => null);
   getLens = options.getLens ?? (() => null);
   getSurface = options.getSurface ?? (() => null);
   onChange = options.onChange ?? (() => {});
   onMeasurement = options.onMeasurement ?? (() => {});
 
-  $('compareLoad').addEventListener('click', () => $('compareInput').click());
-  $('compareInput').addEventListener('change', (e) => {
-    baseFiles = [...(e.target.files ?? [])].filter(
-      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name)
-    );
-    baseFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    baseCracks = [];
-    $('compareBaseInfo').textContent = baseFiles.length
-      ? `${baseFiles.length} 枚（1枚目が基準、2枚目を基準日の σ に使います）`
-      : '';
-    e.target.value = '';
-    onChange();
+  alignmentEditor = createAlignmentEditor({
+    canvas: $('compareAlignmentCanvas'), editButton: $('compareAlignmentEdit'),
+    clearButton: $('compareAlignmentClear'), info: $('compareAlignmentInfo'),
+    onChange: () => { clearComparison(); $('compareStable').value = 'inside'; updateAlignmentSave(); onChange(); },
   });
-
+  $('compareLoad').addEventListener('click', () => $('compareInput').click());
+  $('compareInput').addEventListener('change', async (e) => {
+    const files = [...(e.target.files ?? [])].filter(
+      (f) => f.type.startsWith('image/') || /\.(jpe?g|png|heic|tiff?)$/i.test(f.name)
+    ).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    e.target.value = '';
+    if (!files.length) return;
+    const token = beginBaselineLoad();
+    baseFiles = files;
+    $('compareBaseInfo').textContent = `${baseFiles.length} 枚（1枚目が基準、2枚目を基準日の σ に使います）`;
+    try { await showBaseline(token); } catch (error) { baselineLoadFailed(error, token); }
+  });
   $('compareRun').addEventListener('click', run);
-
+  for (const id of ['compareStable', 'compareReferenceGsd', 'channel', 'subsetHalf']) {
+    $(id).addEventListener('input', () => { clearComparison(); onChange(); });
+  }
   $('compareUseSaved').addEventListener('click', useSavedBaseline);
   $('compareRevisit').addEventListener('click', startRevisit);
+  $('compareAlignmentSave').addEventListener('click', saveAlignment);
+  for (const id of ['compareAlignmentFrame', 'compareAlignmentStage']) $(id).addEventListener('change', drawAlignmentPoints);
+  updateCompareControls();
   refreshSavedBaselines();
 }
 
@@ -83,17 +91,65 @@ export async function refreshSavedBaselines() {
 }
 
 /** 保存済みの基準を基準セットとして使う。フォルダ読み込みの置き換え。 */
+function beginBaselineLoad() {
+  const token = ++loadGeneration;
+  clearComparison(); baseFiles = []; baseCracks = []; baselineRow = null;
+  alignmentEditor.reset(); loading = true;
+  $('compareReferenceGsd').value = ''; $('compareStable').value = 'inside';
+  updateCompareControls(); return token;
+}
+
+function baselineLoadFailed(error, token) {
+  if (token !== loadGeneration) return;
+  baseFiles = []; baselineRow = null; loading = false; alignmentEditor.reset();
+  updateCompareControls(); banner('bad', '基準写真を読み込めませんでした', escapeHtml(error.message));
+}
+
 async function useSavedBaseline() {
   const name = $('compareSaved').value;
-  if (!name) { banner('warn', '測点がありません', '結果シートの「基準として保存」で先に保存してください。'); return; }
-  const row = await getBaseline(name);
-  if (!row) { banner('warn', '読み出せませんでした', '保存が消えている可能性があります。'); return; }
-  baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
-  baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
-  $('compareBaseInfo').textContent =
-    `基準「${name}」 ${baseFiles.length} 枚（${row.savedAt.slice(0, 10)} 保存）`
-    + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
-  onChange();
+  if (!name || running || saving) return null;
+  const token = beginBaselineLoad();
+  try {
+    const row = await getBaseline(name);
+    if (token !== loadGeneration) return null;
+    if (!row) throw new Error('保存された基準がありません');
+    baselineRow = row;
+    baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}`, { type: b.type || 'image/jpeg' }));
+    baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
+    $('compareReferenceGsd').value = row.meta?.gsd > 0 ? row.meta.gsd : '';
+    if (!await showBaseline(token)) return null;
+    $('compareBaseInfo').textContent = `基準「${name}」 ${baseFiles.length} 枚（${row.savedAt.slice(0, 10)} 保存）`
+      + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
+    onChange(); return row;
+  } catch (error) { baselineLoadFailed(error, token); return null; }
+}
+
+function updateAlignmentSave(message = '') {
+  const dirty = baselineRow && JSON.stringify(alignmentEditor?.settings()) !== JSON.stringify(baselineRow.meta?.alignment ?? null);
+  $('compareAlignmentSave').disabled = running || loading || saving || !dirty;
+  $('compareAlignmentSaveInfo').textContent = message || (!baseFiles.length ? '' : baselineRow
+    ? dirty ? '基準枠の変更は未保存です。保存すると次回もこの測点で使えます。' : 'この測点の基準枠を読み込みました。未指定なら新しく描いて保存してください。'
+    : 'ファイル読込みの枠は今回限りです。次回も使う場合は写真シートで基準セットを保存し、ここで選択してください。');
+}
+
+function updateCompareControls() {
+  const busy = running || loading || saving;
+  for (const id of ['compareLoad', 'compareInput', 'compareSaved', 'compareUseSaved', 'compareRevisit', 'compareStable', 'compareReferenceGsd']) $(id).disabled = busy;
+  $('compareRun').disabled = busy || !baseFiles.length;
+  alignmentEditor?.setBusy(busy); updateAlignmentSave();
+}
+
+async function saveAlignment() {
+  if (!baselineRow || running || loading || saving) return;
+  const row = baselineRow, alignment = alignmentEditor.settings();
+  saving = true; updateCompareControls();
+  let message;
+  try {
+    row.meta = await updateBaselineAlignment(row.name, alignment, row.savedAt, row.meta?.alignment ?? null);
+    await refreshSavedBaselines(); $('compareSaved').value = row.name;
+    message = alignment ? '基準枠を保存しました。写真・亀裂・縮尺は保持しています。' : '基準枠の削除を保存しました。';
+  } catch (error) { message = error.message; }
+  finally { saving = false; updateCompareControls(); updateAlignmentSave(message); }
 }
 
 /**
@@ -102,21 +158,14 @@ async function useSavedBaseline() {
  * 人がやるのは歩くことだけ。
  */
 async function startRevisit() {
-  const name = $('compareSaved').value;
-  if (!name) { banner('warn', '測点がありません', '結果シートの「基準として保存」で先に保存してください。'); return; }
-  const row = await getBaseline(name);
-  if (!row) { banner('warn', '読み出せませんでした', '保存が消えている可能性があります。'); return; }
-
-  // 比較用の基準もこの測点に揃える（撮影後そのまま「変化を抽出」できる）
-  baseFiles = row.frames.map((b, i) => new File([b], `${name}_${i}.jpg`, { type: 'image/jpeg' }));
-  baseCracks = Array.isArray(row.meta?.cracks) ? row.meta.cracks : [];
-  $('compareBaseInfo').textContent = `基準「${name}」 ${baseFiles.length} 枚`
-    + (baseCracks.length ? `・亀裂 ${baseCracks.map((c) => c.label).join('・')}` : '');
-
+  const row = await useSavedBaseline();
+  if (!row) return;
+  const name = row.name, token = loadGeneration;
   const refImage = await decodeFile(baseFiles[0]);
   const factor = Math.max(1, Math.round(refImage.width / 420));
   const small = downsample(toGray(refImage, null, 'luma', true), factor);
   const bitmap = await createImageBitmap(baseFiles[0]);
+  if (token !== loadGeneration) { bitmap.close?.(); return; }
   setCaptureBaseline({ small, bitmap, name });
 
   try {
@@ -137,6 +186,50 @@ export function compareLamp() {
   return null;
 }
 
+export function invalidateComparison() { clearComparison(); }
+
+function clearComparison() {
+  revision += 1;
+  lastOutcome = null; alignmentFrames = [];
+  onMeasurement(null);
+  for (const id of ['compareCracks', 'compareStats', 'compareLegend', 'compareStatus', 'compareAlignmentCounts']) $(id).innerHTML = '';
+  $('compareCanvas').classList.add('hidden'); $('compareAlignmentResult').classList.add('hidden');
+  alignmentEditor?.setDiagnostics(null);
+}
+
+async function showBaseline(token) {
+  const image = await decodeFile(baseFiles[0]);
+  if (token !== loadGeneration) return false;
+  alignmentEditor.setImage(image, baselineRow?.meta ?? {});
+  loading = false; updateCompareControls(); onChange(); return true;
+}
+
+function drawAlignmentPoints() {
+  const frame = alignmentFrames[Number($('compareAlignmentFrame').value)];
+  alignmentEditor.setDiagnostics(frame?.alignment?.[$('compareAlignmentStage').value] ?? null);
+}
+
+function renderAlignment(result) {
+  alignmentFrames = result.frames ?? [];
+  if (!alignmentFrames.length) return;
+  $('compareAlignmentResult').classList.remove('hidden');
+  $('compareAlignmentFrame').innerHTML = alignmentFrames.map((f, i) =>
+    `<option value="${i}">${i + 1} 枚目${f.ok ? '' : '（不成立）'}</option>`).join('');
+  const count = (stage) => stage ? `${stage.used} / ${stage.matched} / ${stage.candidates}` : '—';
+  $('compareAlignmentCounts').innerHTML = '<table><tr><th>写真</th><th>粗い位置合わせ</th><th>精密な位置合わせ</th><th>結果</th></tr>'
+    + alignmentFrames.map((f, i) => `<tr><td>${i + 1}</td><td>${count(f.alignment?.coarse)}</td><td>${count(f.alignment?.fine)}</td>`
+      + `<td>${escapeHtml(f.ok ? '成立' : `不成立：${f.reason ?? '位置合わせを確認できず'}`)}</td></tr>`).join('') + '</table>'
+    + '<p class="note">各欄は「採用点 / 対応成立点 / 基準域内の探索点」。小画像での粗い推定は対応点10点以上が必要です。境界をまたぐ画像片は含めません。未実行の段階は — です。</p>';
+  const qualityText = (f) => {
+    const q = f.alignment?.fine?.quality, seed = f.alignment?.seed;
+    return (seed ? `初期照合 ${Number.isFinite(seed.score) ? seed.score.toFixed(3) : '—'}・候補差 ${Number.isFinite(seed.ambiguity) ? seed.ambiguity.toFixed(3) : '—'}` : '初期照合 —')
+      + (q ? ` ／ 独立検査 ${q.checkCount}点・残差90%点 ${Number.isFinite(q.p90Px) ? q.p90Px.toFixed(3) + ' px' : '—'}` : ' ／ 精密検査未実行');
+  };
+  $('compareAlignmentCounts').innerHTML += '<p class="note">' + alignmentFrames.map((f,i)=>`${i+1}枚目：${escapeHtml(qualityText(f))}`).join('<br>') + '</p>';
+  $('compareAlignmentStage').value = alignmentFrames[0].alignment?.fine ? 'fine' : 'coarse';
+  drawAlignmentPoints();
+}
+
 function status(html) {
   $('compareStatus').innerHTML = html;
 }
@@ -150,7 +243,8 @@ async function tick() {
 }
 
 async function run() {
-  const frames = getFrames();
+  if (running || loading || saving) return;
+  const frames = [...getFrames()];
   if (!baseFiles.length) {
     banner('warn', '基準セットがありません', '前回撮った連写をここへ読み込んでください。');
     return;
@@ -161,14 +255,28 @@ async function run() {
     return;
   }
 
+  clearComparison();
+  const runRevision = revision;
+  const stableMode = $('compareStable').value;
+  const alignment = alignmentEditor.settings();
+  if (stableMode !== 'auto' && !alignment) {
+    banner('warn', 'DIC基準領域を指定してください', '基準写真で「青い基準枠を描く」を押し、亀裂とは別の一体で動く模様を囲んでください。');
+    return;
+  }
+  if (baseCracks.length && stableMode === 'auto') {
+    banner('warn', '開口の計測には基準領域が必要です', '写真全体を合わせると部材の動きが補正に混ざります。青い基準枠の内側を選んでください。');
+    return;
+  }
+  const stableRegion = stableMode === 'inside' ? alignmentPredicate(alignment) : null;
   const channel = $('channel').value;
   const subsetHalf = clampInt($('subsetHalf').value, 5, 60, 15);
-  $('compareRun').disabled = true;
+  running = true; updateCompareControls();
 
   try {
     status('<p class="note">基準画像を読み込み中…</p>');
     await tick();
     const baseImage = await decodeFile(baseFiles[0]);
+    if (runRevision !== revision) return;
     const grayA = toGray(baseImage, null, channel, true);
 
     // 基準日の σ。基準画像自身のノイズは今回セットのばらつきに出ないので、
@@ -195,17 +303,14 @@ async function run() {
     const used = frames.slice(0, MAX_FRAMES_B);
     const providers = used.map((f) => () => toGray(f.imageData, null, channel, true));
 
-    const roi = getRoi();
-    const stableRegion = $('compareStable').value === 'outside' && roi
-      ? (x, y) => !(x >= roi.x && x <= roi.x + roi.width && y >= roi.y && y <= roi.y + roi.height)
-      : null;
-
     const result = await measureEpochChange(grayA, providers, {
       subsetHalf,
       step: 40,
       minZNCC: 0.7,
       useHomography: true,
       stableRegion,
+      alignmentRegion: stableMode === 'inside' ? alignment.roi : null,
+      alignmentQuality: stableMode === 'inside' ? { maxErrorPx: 1 } : null,
       sigmaAPx,
       downsample,
       // 4000px 級では段階1を縮小画像で回す
@@ -214,14 +319,16 @@ async function run() {
       // 立ち位置が違うと、面から出た所だけが余分に動く。点群があれば計算して引く
       parallax: getSurface?.(grayA.width, grayA.height) ?? null,
       yieldBetweenFrames: tick,
-      onFrame: (i, n) => status(`<p class="note">比較中… ${i + 1} / ${n} 枚</p>`),
+      onFrame: (i, n) => { if (runRevision === revision) status(`<p class="note">比較中… ${i + 1} / ${n} 枚</p>`); },
     });
 
+    if (runRevision !== revision) return;
+    renderAlignment(result);
     if (!result.ok) {
       lastOutcome = null;
       banner('bad', '比較できませんでした',
-        `${result.reason}。構図が大きく違うか、照明条件が違いすぎる可能性があります。`
-        + '同じ立ち位置・同じ時間帯で撮り直すか、基準セットを確認してください。');
+        `${escapeHtml(result.reason)}。対応点の表と分布を確認してください。`
+        + '基準枠が小さい、模様が乏しい、点が一列に偏る、構図・照明が違うなどの可能性があります。枠を広げる場合も、動く別部材を混ぜないでください。');
       return;
     }
 
@@ -237,20 +344,22 @@ async function run() {
     }));
 
     render(result, grayA, {
-      sigmaAPx, usedFrames: used.length, totalFrames: frames.length, crackRows, frames: used,
+      sigmaAPx, usedFrames: result.frames.filter(f => f.ok).length, totalFrames: frames.length, crackRows, frames: used,
     });
   } catch (err) {
+    if (runRevision !== revision) return;
     lastOutcome = null;
     banner('bad', 'エラー', escapeHtml(err.message));
     console.error(err);
   } finally {
-    $('compareRun').disabled = false;
+    running = false; updateCompareControls();
     onChange();
   }
 }
 
 function render(result, grayA, context) {
-  const gsd = getGsd();
+  const enteredGsd = Number($('compareReferenceGsd').value);
+  const gsd = Number.isFinite(enteredGsd) && enteredGsd > 0 ? enteredGsd : null;
   const toMM = (px) => (gsd ? `${(px * gsd).toFixed(3)} mm` : `${px.toFixed(3)} px`);
 
   const moved = groupSignificant(result, { minCells: 2 });
@@ -275,6 +384,8 @@ function render(result, grayA, context) {
   }
 
   // 影の移動は本物と同じ大きさの偽の変位を作る（合成検証で σ の 400 倍・1.1px 級）。
+  const failedFrames = result.frames.filter(f => !f.ok).length;
+  if (failedFrames) verdict += `<div class="banner warn"><div>位置合わせに不合格の ${failedFrames} 枚を除外しました。対応点の表で理由を確認してください。</div></div>`;
   // 落としたことを黙っていると、判定できていない場所が「変化なし」に化ける
   const litCells = result.stats.illuminationChanged ?? 0;
   if (litCells > 0) {
@@ -341,7 +452,7 @@ function render(result, grayA, context) {
       + '限界は系統誤差の床だけで判定しています。次回から連写を基準に使ってください。</div></div>'
       : '')
     + (gsd == null
-      ? '<p class="note">スケール未設定のため px 表示です。スケールシートで決めると mm になります。</p>'
+      ? '<p class="note">基準写真の縮尺が未設定のため px 表示です。比較シートの「基準写真の縮尺」を入力してください。</p>'
       : '');
 
   status(verdict);

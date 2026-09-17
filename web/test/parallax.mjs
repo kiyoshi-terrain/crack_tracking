@@ -4,7 +4,7 @@
 // 変位場」を作って、それを解き戻せるかを見る。画像を通した端から端までの検証は
 // test/parallax-e2e.mjs（時間がかかるので通常の検証には入れない）。
 
-import { cellGeometry, estimateBaselineShift, correctParallax, leverageQuality } from '../src/parallax.js';
+import { cellGeometry, estimateBaselineShift, correctParallax, parallaxField, leverageQuality } from '../src/parallax.js';
 import { sampleOutOfPlane, fitWallPlane, placeViewpoint } from '../src/pointcloud.js';
 import { cameraFromPlane, pixelScale } from '../src/surface.js';
 import { fitAffine, residuals } from '../src/transform.js';
@@ -104,6 +104,19 @@ export function runParallaxTests(check, near) {
     check('立ち位置のずれを復元（雑音なし）',
       fit.ok && near(fit.shiftMM.x, T.x, 1) && near(fit.shiftMM.y, T.y, 1) && near(fit.shiftMM.z, T.z, 20),
       fit.ok ? `x ${fit.shiftMM.x.toFixed(1)} y ${fit.shiftMM.y.toFixed(1)} z ${fit.shiftMM.z.toFixed(0)}` : fit.reason);
+  }
+
+  // 安定域の外が広く動いても、推定と射影除去の両方を同じ安定域に限定する。
+  {
+    const stableRegion = (x) => x < W / 2;
+    const raw = cellsFrom(base, trueField(geo, { x: 200, y: -30, z: 120 }));
+    const model = parallaxField(geo, estimateBaselineShift(geo, raw, { stableRegion }));
+    const cells = base.map((c, i) => ({ ...c,
+      du: model.get(i).du + (stableRegion(c.x) ? 0 : 0.75), dv: model.get(i).dv }));
+    const fixed = correctParallax(cells, geo, { stableRegion });
+    check('視差の安定域外にある0.75pxの変位を保存', fixed.ok && cells.every((c) =>
+      near(c.du, stableRegion(c.x) ? 0 : 0.75, 0.001) && near(c.dv, 0, 0.001)));
+    check('視差の安定域不足を拒否', !estimateBaselineShift(geo, raw, { stableRegion: () => false }).ok);
   }
 
   // 段階1の当てはめ残り（アフィンのずれ）が乗っても T は動かない
